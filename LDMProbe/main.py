@@ -1,3 +1,9 @@
+""" Large Displacement Moment Probe for ANSYS Mechanical
+    (c) 2026 Yair Preiss
+
+TODO: Short explanation of what the tool does, how it works, and how to install it.
+"""
+
 import units
 import math
 from System.Collections.Generic import List
@@ -5,35 +11,69 @@ from System import Array
 
 #-------------------Helper Functions--------------------
 
-#Vector magnitude
-def mag(a):         
-    b=sqrt(a[0]**2.0+a[1]**2.0+a[2]**2.0)
+
+def mag(a):
+    """ Return the vector magnitude (norm) of a 3-length list"""  
+    
+    b = sqrt(a[0]**2.0 + a[1]**2.0 + a[2]**2.0)
+    
     return b
+    
 
-#Spatial Transformation Matrix [4x4]
-def STM(x,y,z):      
-    M=Array.CreateInstance(float,16)
+def create_stm(x, y, z):  
+    """ Create a 4x4 spatial transformation matrix 
+    
+    The spatial transformation matrix maps the effect of a 
+    rotation on a vector x, i.e. [M] * x = y. For this implementation,
+    translations are not considered.
+    
+    | x0 x1 x2 0 |
+    | y0 y1 y2 0 |
+    | z0 z1 z2 0 |
+    |  0  0  0 1 |
+    
+    Args
+    ---
+    x, y, z: the 3-length rows of the spatial transformation matrix 
+    
+    Returns
+    ---
+    4x4 transformation matrix as a linear array in row-major format 
+    
+    """
+    
+    matrix = Array.CreateInstance(float,16)
+    
     for i in range(3):
-        M[i]=x[i]
-        M[i+4]=y[i]
-        M[i+8]=z[i]
-        M[i+12]=0.0
-    M[3]=0.0
-    M[7]=0.0
-    M[11]=0
-    M[15]=1.0
-    return M        
+        matrix[i] = x[i]
+        matrix[i+4] = y[i]
+        matrix[i+8] = z[i]
+        matrix[i+12] = 0.0
+        
+    matrix[3]=0.0
+    matrix[7]=0.0
+    matrix[11]=0
+    matrix[15]=1.0
+    
+    return matrix        
 
-#Vector cross product
-def cross(a,b):     
+
+def cross(a, b):     
+    """ Return the cross product of two 3-length lists (vectors)
+    """
+    
     c = [a[1]*b[2] - a[2]*b[1],
-            a[2]*b[0] - a[0]*b[2],
-            a[0]*b[1] - a[1]*b[0]]
+         a[2]*b[0] - a[0]*b[2],
+         a[0]*b[1] - a[1]*b[0]]
+         
     return c
 
 #Coordinate transformation
-def transform(m,v): 
-    c=[None]*3
+def transform(matrix, vector): 
+    """ Compute a coordinate transform using a transformation matrix
+    """
+    coordinates = [0.0, 0.0, 0.0]
+    
     for i in range(3):
         sum=0
         for j in range(3):
