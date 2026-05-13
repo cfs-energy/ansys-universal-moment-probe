@@ -1,5 +1,10 @@
 # Extension Manual
 
+[Purpose](#purpose)  
+[Instructions for Use](#instructions-for-use)  
+[Core Process Outline](#core-process-outline)  
+[Example Case](#example-case)
+
 ## Purpose
 When Large Deflection (NLGEOM) is on, the standard ANSYS Moment Probe will calculate the moment about the undeformed position of the scoped geometry, with the nodal forces at the displaced nodal positions. This means that the resultant moments will have fictitious moment arms and the values incorrect. This installable adds a Tree Object result into the Solution right-click menu, designed to replicate the functionality of the built-in Moment Probe, but with compensation for nodal displacements when Large Deflection is set to “On”. 
 
