@@ -116,10 +116,13 @@ While for the first load case with only the axial load we will expect no moment 
 </p>
 
 Knowing that the initial moment arm for the Fx component was 10mm, and 0mm for the Fz, we can calculated the resultant moment for that section:
+
 $$
 M = F_x \times (r_z - (dz_{tip} - dz_{section})) - F_z \times (r_x - (dx_{tip} - dx_{section}))
 $$ 
+
 and simplifying for Fx=Fz, we get:
+
 $$
 M = 1000[N] \times (10 - (3.426125765 - 3.041292906) - (30.52874565 - 27.80307388))[mm] = 6,889[Nmm]
 $$ 
