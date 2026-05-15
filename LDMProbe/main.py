@@ -21,7 +21,7 @@ def mag(a):
     return b
     
 
-def create_stm(x, y, z):  
+def create_create_stm(x, y, z):  
     """ Create a 4x4 spatial transformation matrix 
     
     The spatial transformation matrix maps the effect of a 
@@ -71,16 +71,16 @@ def cross(a, b):
 
 #Coordinate transformation
 def transform(matrix, vector): 
-    """ Compute a coordinate transform using a transformation matrix
+    """ Compute a coordinate transform using the rotation matrix 
+    embedded with a transformation matrix
     """
     coordinates = [0.0, 0.0, 0.0]
     
     for i in range(3):
-        sum=0
         for j in range(3):
-            sum = sum + m[i][j]*v[j]
-        c[i]=sum
-    return c
+            coordinates[i] += matrix[i][j]*vector[j]
+            
+    return coordinates
 
 
 def vsum(a,b):     
@@ -96,7 +96,7 @@ def avg_disp(points):
     
     Args 
     ---
-    points: ???
+    points: list of 3-length lists corresponding to the point coordinates
     
     Returns 
     ---
@@ -104,10 +104,12 @@ def avg_disp(points):
     """
     
     n = len(points)
-    disp = [sum(coord) / n for coord in zip(*points)] 
+    disp = [sum(coord) for coord in zip(*points)] / n
     return disp
 
+
 #-------------------Main Fuction--------------------
+
 
 def LDMProbe(result,stepInfo,collector):
 
@@ -273,7 +275,7 @@ def LDMProbe(result,stepInfo,collector):
             center = (CS.Origin[0]/mod_scale,CS.Origin[1]/mod_scale,CS.Origin[2]/mod_scale)
         size = r_max
         cs = ExtAPI.Graphics.Scene.Factory3D.CreateTriad(size) # Create triad graphics and set size 
-        M=STM(CS.XAxis,CS.YAxis,CS.ZAxis) # Convert 3x3 CS into STM 4x4
+        M=create_stm(CS.XAxis,CS.YAxis,CS.ZAxis) # Convert 3x3 CS into STM 4x4
         cs.Transformation3D.Set(M) # Define triad orientation
         cs.Transformation3D.Translate(center[0],center[1],center[2]) # Define tirad origin
         Vector = ExtAPI.Graphics.Scene.Factory3D.CreateArrow(2*size) # Create vector graphics and set size 
@@ -288,30 +290,44 @@ def LDMProbe(result,stepInfo,collector):
         Vector.Transformation3D.Translate(center[0],center[1],center[2]) # Define vector origin
     reader.Dispose()
 
+
 #-------------------Graphics Display/Hide--------------------
 
+
 def ShowCS(result): # Graphics to display when result object is selected in Tree
+    """ Display graphics when result object is selected in the tree 
+    
+    Does the following: 
+    - Shows and scales vectors 
+    - Converts results using proper model units 
+    """
+    
     if result.State == "solved":
-        ExtAPI.Graphics.ViewOptions.ShowResultVectors=True
-        ExtAPI.Graphics.ViewOptions.VectorDisplay.DisplayType=VectorDisplayType.Sphere
-        ExtAPI.Graphics.ViewOptions.VectorDisplay.LengthMultiplier=0.1
-        modunits=ExtAPI.DataModel.GeoData.Unit 
-        scale = units.ConvertToUserUnit(ExtAPI,1,modunits,"Length")
+        
+        # Settings independent of tool mode
+        ExtAPI.Graphics.ViewOptions.ShowResultVectors = True
+        ExtAPI.Graphics.ViewOptions.VectorDisplay.DisplayType = VectorDisplayType.Sphere
+        ExtAPI.Graphics.ViewOptions.VectorDisplay.LengthMultiplier = 0.1
+        modunits = ExtAPI.DataModel.GeoData.Unit 
+        scale = units.ConvertToUserUnit(ExtAPI, 1, modunits, "Length")
         mode = result.Properties["Mode"].Value
         CS = result.Properties["Orientation"].Value
         r_max = result.Properties["Results/Rmax"].Value
+        
         if mode == "Interface":
-            faceIds=result.Properties["Geometry"].Value
-            centroids=[]
+            faceIds = result.Properties["Geometry"].Value
+            centroids = []
             for id in faceIds:
                 face = ExtAPI.DataModel.GeoData.GeoEntityById(id)
                 centroids.append(face.Centroid)
             center = avg_disp(centroids)
+            
         if mode == "Section":
-            center = (CS.Origin[0]/scale,CS.Origin[1]/scale,CS.Origin[2]/scale)
+            center = (CS.Origin[0]/scale, CS.Origin[1]/scale, CS.Origin[2]/scale)
+            
         size = r_max
         cs = ExtAPI.Graphics.Scene.Factory3D.CreateTriad(size)
-        M=STM(CS.XAxis,CS.YAxis,CS.ZAxis)
+        M = create_stm(CS.XAxis, CS.YAxis, CS.ZAxis)
         cs.Transformation3D.Set(M)
         cs.Transformation3D.Translate(center[0],center[1],center[2])
         Vector = ExtAPI.Graphics.Scene.Factory3D.CreateArrow(2*size)
@@ -319,11 +335,12 @@ def ShowCS(result): # Graphics to display when result object is selected in Tree
         x = result.Properties["Results/Mx"].Value
         y = result.Properties["Results/My"].Value
         z = result.Properties["Results/Mz"].Value
-        r = sqrt(y*y+z*z)
+        r = sqrt(y*y + z*z)
         Vector.Transformation3D.Set(M)
         Vector.Transformation3D.Rotate(ExtAPI.Graphics.CreateVector3D(CS.YAxis[0],CS.YAxis[1],CS.YAxis[2]), atan2(x,r))
         Vector.Transformation3D.Rotate(ExtAPI.Graphics.CreateVector3D(CS.XAxis[0],CS.XAxis[1],CS.XAxis[2]), atan2(z,y) - pi/2.0)
         Vector.Transformation3D.Translate(center[0],center[1],center[2])
+
 
 def HideCS(result):
     """ Clear graphics object when tool is de-selected
@@ -352,7 +369,7 @@ def geoCheck(result, prop):
                 return False 
         
         elif is_mode_section:
-            if is_geom_body:
+            if is_geom_face:
                 return True; 
             else:
                 return False 
