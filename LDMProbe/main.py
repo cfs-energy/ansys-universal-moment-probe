@@ -86,8 +86,19 @@ def vsum(a,b):
     c=[b[0]+a[0],b[1]+a[1],b[2]+a[2]]
     return c
 
-#Average displacements
-def ave_disp(points): 
+
+def avg_disp(points): 
+    """ Compute the average displacement within a group of points 
+    
+    Args 
+    ---
+    points: ???
+    
+    Returns 
+    ---
+    list: 3-length vector of x,y,z displacement coordinates 
+    """
+    
     n = len(points)
     disp = [sum(coord) / n for coord in zip(*points)] 
     return disp
@@ -128,7 +139,7 @@ def LDMProbe(result,stepInfo,collector):
                 n_pos[i] = [x*sol_scale for x in LOCDEF.GetNodeValues(node)] # Get nodal positions at load step
             if LD=="Off":
                 n_pos[i] = [mesh.NodeById(node).X, mesh.NodeById(node).Y, mesh.NodeById(node).Z] # Get nodal initial position  
-        CG = ave_disp(n_pos) # Determine nodal centroid
+        CG = avg_disp(n_pos) # Determine nodal centroid
         elementIds=list(set(elementIds)) # Remove duplicate elements from list 
         F_count = 0
         for Id in elementIds:
@@ -197,7 +208,7 @@ def LDMProbe(result,stepInfo,collector):
                 n_pos[i] = [x*sol_scale for x in LOCDEF.GetNodeValues(node)] # Get nodal positions at load step
             if LD=="Off":
                 n_pos[i] = [mesh.NodeById(node).X, mesh.NodeById(node).Y, mesh.NodeById(node).Z] # Get nodal initial position
-        CG = ave_disp(n_pos) # Determine nodal centroid            
+        CG = avg_disp(n_pos) # Determine nodal centroid            
         F_count = 0
         for element in secelement:
             for node in posnode:
@@ -253,7 +264,7 @@ def LDMProbe(result,stepInfo,collector):
             for id in faceIds:
                 face = ExtAPI.DataModel.GeoData.GeoEntityById(id)
                 centroids.append(face.Centroid)
-            center = ave_disp(centroids)
+            center = avg_disp(centroids)
         if mode == "Section":
             center = (CS.Origin[0]/mod_scale,CS.Origin[1]/mod_scale,CS.Origin[2]/mod_scale)
         size = r_max
@@ -291,7 +302,7 @@ def ShowCS(result): # Graphics to display when result object is selected in Tree
             for id in faceIds:
                 face = ExtAPI.DataModel.GeoData.GeoEntityById(id)
                 centroids.append(face.Centroid)
-            center = ave_disp(centroids)
+            center = avg_disp(centroids)
         if mode == "Section":
             center = (CS.Origin[0]/scale,CS.Origin[1]/scale,CS.Origin[2]/scale)
         size = r_max
