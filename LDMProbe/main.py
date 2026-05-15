@@ -9,6 +9,7 @@ import math
 from System.Collections.Generic import List
 from System import Array
 
+
 #-------------------Helper Functions--------------------
 
 
@@ -81,9 +82,12 @@ def transform(matrix, vector):
         c[i]=sum
     return c
 
- #Vector sum
+
 def vsum(a,b):     
-    c=[b[0]+a[0],b[1]+a[1],b[2]+a[2]]
+    """ Compute the element-wise sum of two vectors, returning a new vector
+    """
+    
+    c = [b[0] + a[0], b[1] + a[1], b[2] + a[2]]
     return c
 
 
@@ -321,7 +325,10 @@ def ShowCS(result): # Graphics to display when result object is selected in Tree
         Vector.Transformation3D.Rotate(ExtAPI.Graphics.CreateVector3D(CS.XAxis[0],CS.XAxis[1],CS.XAxis[2]), atan2(z,y) - pi/2.0)
         Vector.Transformation3D.Translate(center[0],center[1],center[2])
 
-def HideCS(result): # Clear grapghics when result object is deselected
+def HideCS(result):
+    """ Clear graphics object when tool is de-selected
+    """ 
+    
     ExtAPI.Graphics.Scene.Clear()
 
 
