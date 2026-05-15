@@ -313,11 +313,34 @@ def ShowCS(result): # Graphics to display when result object is selected in Tree
 def HideCS(result): # Clear grapghics when result object is deselected
     ExtAPI.Graphics.Scene.Clear()
 
+
 #-------------------Scoping verification--------------------
 
+
 def geoCheck(result, prop):
-    #ExtAPI.Log.WriteMessage(str(prop.Value))
-    if prop.Value != None:
-        if result.Properties["Mode"].Value == "Interface" and ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type != GeoCellTypeEnum.GeoFace: return False
-        if result.Properties["Mode"].Value == "Section" and ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type != GeoCellTypeEnum.GeoBody: return False
-        return True
+    """ Checks ??? to make sure the scoping is correct
+    """
+    
+    is_mode_interface = result.Properties["Mode"].Value == "Interface"
+    is_mode_section = result.Properties["Mode"].Value == "Section"
+    is_geom_face = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoFace
+    is_geom_body = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoFace
+        
+    if prop.Value != None: 
+        if is_mode_interface:
+            if is_geom_face:
+                return True 
+            else: 
+                return False 
+        
+        elif is_mode_section:
+            if is_geom_body:
+                return True; 
+            else:
+                return False 
+        
+        else: 
+            return False 
+    
+    else:
+        return False 
