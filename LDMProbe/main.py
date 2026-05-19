@@ -21,7 +21,7 @@ def mag(a):
     return b
     
 
-def create_create_stm(x, y, z):  
+def create_stm(x, y, z):  
     """ Create a 4x4 spatial transformation matrix 
     
     The spatial transformation matrix maps the effect of a 
@@ -35,7 +35,8 @@ def create_create_stm(x, y, z):
     
     Args
     ---
-    x, y, z: the 3-length rows of the spatial transformation matrix 
+    x, y, z: the 3-length rows of the spatial transformation matrix corresponding to the 
+        direction of each axis in the global system
     
     Returns
     ---
@@ -55,6 +56,10 @@ def create_create_stm(x, y, z):
     matrix[7]=0.0
     matrix[11]=0
     matrix[15]=1.0
+    matrix[3] = 0.0
+    matrix[7] = 0.0
+    matrix[11] = 0
+    matrix[15] = 1.0
     
     return matrix        
 
@@ -69,7 +74,7 @@ def cross(a, b):
          
     return c
 
-#Coordinate transformation
+
 def transform(matrix, vector): 
     """ Compute a coordinate transform using the rotation matrix 
     embedded with a transformation matrix
@@ -104,7 +109,6 @@ def avg_disp(points):
     """
     
     n = len(points)
-    disp = [sum(coord) for coord in zip(*points)] / n
     return disp
 
 
@@ -121,10 +125,11 @@ def LDMProbe(result,stepInfo,collector):
         return
     mesh = analysis.MeshData
     modunits = ExtAPI.DataModel.GeoData.Unit
+    modunits = ExtAPI.DataModel.GeoData.Unit # TODO: is this always meters?
     LD=analysis.AnalysisSettings.PropertyByName('UseLargeDeformation').StringValue
     LOCDEF = reader.GetResult("LOC_DEF") 
     F = reader.GetResult("ENFO")
-    mode = result.Properties["Mode"].Value
+    mode = result.Properties["Mode"].Value # "Interface" or "Section"
     CS = result.Properties["Orientation"].Value
     solve_unit = LOCDEF.GetComponentInfo('X').Unit
     mod_scale = units.ConvertToUserUnit(ExtAPI,1,modunits,"Length")
@@ -137,7 +142,7 @@ def LDMProbe(result,stepInfo,collector):
     #Begin processing
     if mode == "Interface":
         n = len(nodes)
-        n_pos=[None]*n 
+        n_pos=[None]*n      # Number of nodal positions 
         elementIds = []
         for i, node in enumerate(nodes):
             elementIds = elementIds+[int(x) for x in mesh.NodeById(node).ConnectedElementIds] # Get all elements associated with nodes
@@ -179,7 +184,7 @@ def LDMProbe(result,stepInfo,collector):
         for f, force in enumerate(F_nodes):
             r[f] = [(n_pos[f][0]-CG[0]),(n_pos[f][1]-CG[1]),(n_pos[f][2]-CG[2])] # Determine loacal r vector
             if mag(r[f]) > r_max:
-                r_max = mag(r[f])
+                r_max = mag(r[f]) # used to size display vector
             Global_M = vsum(Global_M,cross(r[f],force)) # Sum all M=rxF products in Global orientation (default solver reporting)
         Local_M = transform(rot,Global_M) # Transform M into selected CS orientation 
         Local_M = [-m for m in Local_M] # Sign inverse for external force Reaction.
@@ -353,15 +358,26 @@ def HideCS(result):
 
 
 def geoCheck(result, prop):
-    """ Checks ??? to make sure the scoping is correct
+    """ Checks to make sure the geometry scoping is correct
+    
+    Args
+    ---
+    result: 
+    prop: property of the Geometry/callback
+    
+    Returns
+    ---
+        True, if mode is "Interface" and geometry is a face
+        True, if mode is "Section" and geometry is a body
+        False, otherwise
     """
     
     is_mode_interface = result.Properties["Mode"].Value == "Interface"
     is_mode_section = result.Properties["Mode"].Value == "Section"
     is_geom_face = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoFace
-    is_geom_body = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoFace
+    is_geom_body = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoBody
         
-    if prop.Value != None: 
+    if prop.Value is not None: 
         if is_mode_interface:
             if is_geom_face:
                 return True 
@@ -369,8 +385,8 @@ def geoCheck(result, prop):
                 return False 
         
         elif is_mode_section:
-            if is_geom_face:
-                return True; 
+            if is_geom_body:
+                return True 
             else:
                 return False 
         
