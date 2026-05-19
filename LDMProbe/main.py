@@ -123,6 +123,9 @@ def get_scale(analysis, is_ld_on):
 
     if is_ld_on:
         unit_scale = units.ConvertUnit(1, solve_units, model_units,"Length")
+    
+    else:
+        unit_scale = 1.0
 
     return unit_scale, model_scale
 
