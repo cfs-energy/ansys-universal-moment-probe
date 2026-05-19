@@ -52,10 +52,6 @@ def create_stm(x, y, z):
         matrix[i+8] = z[i]
         matrix[i+12] = 0.0
         
-    matrix[3]=0.0
-    matrix[7]=0.0
-    matrix[11]=0
-    matrix[15]=1.0
     matrix[3] = 0.0
     matrix[7] = 0.0
     matrix[11] = 0
@@ -109,7 +105,134 @@ def avg_disp(points):
     """
     
     n = len(points)
+    disp = [sum(coord) / n for coord in zip(*points)]
     return disp
+
+
+def get_unit_scale(reader, is_ld_on):
+    model_units = ExtAPI.DataModel.GeoData.Unit 
+    result_locdef = reader.GetResult("LOC_DEF")
+    solve_units = result_locdef.GetComponentInfo('X').Unit
+    model_scale = units.ConvertToUserUnit(ExtAPI, 1, model_units, "Length")
+
+    if is_ld_on:
+        unit_scale = units.ConvertUnit(1, solve_units, model_units,"Length")
+
+    return unit_scale
+
+
+def get_n_elemnodal_forces(mesh, elem_ids, node_ids):
+    count = 0 
+
+    for elem_id in elem_ids:
+        element = mesh.ElementById(elem_id)
+        for node_id in node_ids:
+            if element.NodeIds.IndexOf(node_id) >= 0: 
+                # Nodes attached to the element have a positive index
+                count += 1
+    
+    return count
+
+
+def get_elemnodal_data(mesh, result_enfo, result_locdef, n_forces, elem_ids, node_ids, is_ld_on, unit_scale):
+    node_forces = [[] for _ in range(n_forces)]  
+    node_positions = [None for _ in range(n_forces)]
+
+    count = 0
+    for Id in elem_ids:
+        element = mesh.ElementById(Id)
+        # elementnodal force reactions are reported in a row-major linear array, 
+        # with each [Fx1, Fy1, Fz1, Fx2, Fy2, Fz3, ... Fzn], not as individual vectors
+        elem_force = result_enfo.GetElementValues(Id) 
+        index = List[object]()
+
+        # TODO: this is repeated work, we could just associate node ids with the element id
+        for node_id in node_ids:
+            if element.NodeIds.IndexOf(node_id) >= 0:
+                index.Add(element.NodeIds.IndexOf(node_id))
+
+        for i in range(len(index)):
+            # Assign elementnodal force reaction into node-specific vector
+            node_forces[count] = [0.0 for _ in range(3)]
+            node_forces[count][0] = elem_force[3*index[i]]
+            node_forces[count][1] = elem_force[3*index[i]+1]
+            node_forces[count][2] = elem_force[3*index[i]+2]
+            if is_ld_on:
+                # Assign elementnodal position vectors to pair with respective force reactions
+                node_positions[count] = [x*unit_scale for x in result_locdef.GetNodeValues(element.NodeIds[index[i]])] 
+            else:
+                node_positions[count] = [
+                    mesh.NodeById(element.NodeIds[index[i]]).X, 
+                    mesh.NodeById(element.NodeIds[index[i]]).Y, 
+                    mesh.NodeById(element.NodeIds[index[i]]).Z
+                ]
+            count += 1
+
+    return node_forces, node_positions
+
+
+def process_interface(analysis, nodes, is_ld_on, unit_scale, rotation_matrix):
+    """ If mode is interface, process the reaction moment
+    """
+
+    # Unpack data related to the model 
+    reader = analysis.GetResultsData()
+    result_locdef = reader.GetResult("LOC_DEF") 
+    result_enfo = reader.GetResult("ENFO")
+    mesh = analysis.MeshData 
+    
+    n_nodes = len(nodes)
+
+    # Node positions; this will become a list of 3-length lists
+    node_positions=[None for _ in range(n_nodes)] 
+
+    # Number of element ids is not known a priori 
+    elem_ids = []
+
+    # Populate node positions array
+    for i, node in enumerate(nodes):
+        # Get all elements associated with nodes
+        elem_ids = elem_ids + [int(x) for x in mesh.NodeById(node).ConnectedElementIds] 
+        if is_ld_on:
+            # Get nodal positions at load step
+            node_positions[i] = [x * unit_scale for x in result_locdef.GetNodeValues(node)] 
+        else:
+            # Get nodal initial position  
+            node_positions[i] = [mesh.NodeById(node).X, mesh.NodeById(node).Y, mesh.NodeById(node).Z] 
+    
+    # Find node centroid and remove duplicate elements from list 
+    centroid = avg_disp(node_positions) 
+    elem_ids=list(set(elem_ids)) 
+
+    # Count the number of nodes that the result should be summed over 
+    # This will be n_nodes_per_element * n_elements 
+    n_forces = get_n_elemnodal_forces(mesh, elem_ids, nodes)  
+
+    node_forces, node_positions = get_elemnodal_data(mesh, result_enfo, result_locdef, n_forces, elem_ids, nodes, is_ld_on, unit_scale)
+
+    # Compute relative position after deflection (local r vector)
+    # Also keep track of largest value for sizing the display vector
+    r = [None for _ in range(n_forces)] 
+    global_moment = [0.0, 0.0, 0.0]
+    r_max = 0
+    for f, force in enumerate(node_forces):
+        r[f] = [
+            node_positions[f][0] - centroid[0],
+            node_positions[f][1] - centroid[1],
+            node_positions[f][2] - centroid[2] 
+        ]
+        if mag(r[f]) > r_max:
+            r_max = mag(r[f]) 
+
+        # Sum all M=rxF products in Global orientation (default solver reporting)
+        # TODO: logic here could be improved?
+        global_moment = vsum(global_moment,cross(r[f],force)) 
+
+    local_moment = transform(rotation_matrix,global_moment) # Transform M into selected CS orientation 
+
+    # Sign inverse for external force Reaction 
+    # (return the reaction force, which is opposite the internal force)
+    local_moment = [-m for m in local_moment] 
 
 
 #-------------------Main Fuction--------------------
@@ -124,71 +247,19 @@ def LDMProbe(result,stepInfo,collector):
     if stepInfo.Time not in solved_steps:
         return
     mesh = analysis.MeshData
-    modunits = ExtAPI.DataModel.GeoData.Unit
-    modunits = ExtAPI.DataModel.GeoData.Unit # TODO: is this always meters?
-    LD=analysis.AnalysisSettings.PropertyByName('UseLargeDeformation').StringValue
-    LOCDEF = reader.GetResult("LOC_DEF") 
-    F = reader.GetResult("ENFO")
+
+    is_ld_on = analysis.AnalysisSettings.PropertyByName('UseLargeDeformation').StringValue == "On"
+    unit_scale = get_unit_scale(reader, is_ld_on)
+
     mode = result.Properties["Mode"].Value # "Interface" or "Section"
     CS = result.Properties["Orientation"].Value
-    solve_unit = LOCDEF.GetComponentInfo('X').Unit
-    mod_scale = units.ConvertToUserUnit(ExtAPI,1,modunits,"Length")
-    if LD=="On": 
-        sol_scale = units.ConvertUnit(1,solve_unit,modunits,"Length") # Set scale factor between Solver Units and Model Units
     reader.CurrentResultSet = stepInfo.Set
     nodes = collector.Ids
-    rot = [CS.XAxis,CS.YAxis,CS.ZAxis]
+    rotation_matrix = [CS.XAxis, CS.YAxis, CS.ZAxis]
 
     #Begin processing
     if mode == "Interface":
-        n = len(nodes)
-        n_pos=[None]*n      # Number of nodal positions 
-        elementIds = []
-        for i, node in enumerate(nodes):
-            elementIds = elementIds+[int(x) for x in mesh.NodeById(node).ConnectedElementIds] # Get all elements associated with nodes
-            if LD=="On":
-                n_pos[i] = [x*sol_scale for x in LOCDEF.GetNodeValues(node)] # Get nodal positions at load step
-            if LD=="Off":
-                n_pos[i] = [mesh.NodeById(node).X, mesh.NodeById(node).Y, mesh.NodeById(node).Z] # Get nodal initial position  
-        CG = avg_disp(n_pos) # Determine nodal centroid
-        elementIds=list(set(elementIds)) # Remove duplicate elements from list 
-        F_count = 0
-        for Id in elementIds:
-            element = mesh.ElementById(Id)
-            for node in nodes:
-                if element.NodeIds.IndexOf(node)>=0: # Index will be -1 for nodes NOT in element
-                    F_count = F_count+1 # Count number of elementnodal forces needed to resolve moment (each node, once per element)
-        F_nodes = [None]*F_count
-        n_pos = [None]*F_count
-        count = 0
-        for Id in elementIds:
-            element = mesh.ElementById(Id)
-            F_element = F.GetElementValues(Id) # elementnodal force reactions are reported in one long list with each [Fx1, Fy1, Fz1, Fx2, Fy2, Fz3, ... Fzn], not as individual vectors
-            index = List[object]()
-            for node in nodes:
-                if element.NodeIds.IndexOf(node)>=0:
-                    index.Add(element.NodeIds.IndexOf(node))
-            for i in range(len(index)):
-                F_nodes[count]=[None]*3 # Assign elementnodal force reaction into node-specific vector
-                F_nodes[count][0] = F_element[3*index[i]]
-                F_nodes[count][1] = F_element[3*index[i]+1]
-                F_nodes[count][2] = F_element[3*index[i]+2]
-                if LD=="On":
-                    n_pos[count] = [x*sol_scale for x in LOCDEF.GetNodeValues(element.NodeIds[index[i]])] # Assign elementnodal position vectors to pair with respective force reactions
-                if LD=="Off":
-                    n_pos[count] = [mesh.NodeById(element.NodeIds[index[i]]).X, mesh.NodeById(element.NodeIds[index[i]]).Y, mesh.NodeById(element.NodeIds[index[i]]).Z]
-                count = count+1    
-        r = [None]*F_count 
-        Global_M = [0.0,0.0,0.0]
-        r_max = 0
-        for f, force in enumerate(F_nodes):
-            r[f] = [(n_pos[f][0]-CG[0]),(n_pos[f][1]-CG[1]),(n_pos[f][2]-CG[2])] # Determine loacal r vector
-            if mag(r[f]) > r_max:
-                r_max = mag(r[f]) # used to size display vector
-            Global_M = vsum(Global_M,cross(r[f],force)) # Sum all M=rxF products in Global orientation (default solver reporting)
-        Local_M = transform(rot,Global_M) # Transform M into selected CS orientation 
-        Local_M = [-m for m in Local_M] # Sign inverse for external force Reaction.
-    
+        process_interface(analysis, nodes, is_ld_on, unit_scale, rotation_matrix)
     if mode == "Section":
         body = result.Properties["Geometry"].Value
         totelement = mesh.MeshRegionById(body.Ids[0]).Elements
