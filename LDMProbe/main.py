@@ -1,16 +1,13 @@
 """ Large Displacement Moment Probe for ANSYS Mechanical
     (c) 2026 Yair Preiss
 
-TODO: Short explanation of what the tool does, how it works, and how to install it.
+See README and Docs/Manual.md for installation and usage instructions.
 """
 
 import units
 from math import sqrt, pi, atan2
 from System.Collections.Generic import List
 from System import Array
-
-
-#-------------------Helper Functions--------------------
 
 
 def mag(a):
@@ -35,8 +32,8 @@ def create_stm(x, y, z):
     
     Args
     ---
-    x, y, z: the 3-length rows of the spatial transformation matrix corresponding to the 
-        direction of each axis in the global system
+    x, y, z: the 3-length rows of the spatial transformation matrix 
+        corresponding to the direction of each axis in the global system
     
     Returns
     ---
@@ -110,13 +107,14 @@ def avg_disp(points):
 
 
 def rotation_matrix_from_local_csys(local_csys): 
-    """ Return a rotation matrix given a local coordinate system 
-    """
+    """ Return a rotation matrix given a local coordinate system """
 
     return [local_csys.XAxis, local_csys.YAxis, local_csys.ZAxis]
 
 
 def get_scale(analysis, is_ld_on):
+    """ Get the scalar factors associated with solver and model units """
+
     reader = analysis.GetResultsData()
     model_units = ExtAPI.DataModel.GeoData.Unit 
     result_locdef = reader.GetResult("LOC_DEF")
@@ -130,6 +128,9 @@ def get_scale(analysis, is_ld_on):
 
 
 def get_n_elemnodal_forces(mesh, elem_ids, node_ids):
+    """ Get the number of elemnodal force results required, by determining which
+    nodes are associated with the elements
+    """
     count = 0 
 
     for elem_id in elem_ids:
@@ -142,9 +143,20 @@ def get_n_elemnodal_forces(mesh, elem_ids, node_ids):
     return count
 
 
-def get_elemnodal_data(mesh, result_enfo, result_locdef, n_forces, elem_ids, node_ids, is_ld_on, unit_scale):
-    node_forces = [[] for _ in range(n_forces)]  
-    node_positions = [None for _ in range(n_forces)]
+def get_elemnodal_data(
+    mesh, 
+    result_enfo, 
+    result_locdef,
+    n_forces, 
+    elem_ids, 
+    node_ids, 
+    is_ld_on, 
+    unit_scale
+):
+    """ 
+    """
+    node_forces = [[0.0 for _ in range(3)] for _ in range(n_forces)]  
+    node_positions = [[0.0 for _ in range(3)] for _ in range(n_forces)]
 
     count = 0
     for Id in elem_ids:
@@ -154,20 +166,25 @@ def get_elemnodal_data(mesh, result_enfo, result_locdef, n_forces, elem_ids, nod
         elem_force = result_enfo.GetElementValues(Id) 
         index = List[object]()
 
-        # TODO: this is repeated work, we could just associate node ids with the element id
+        # TODO: this is repeated work, we could just associate node ids 
+        # with the element id
         for node_id in node_ids:
             if element.NodeIds.IndexOf(node_id) >= 0:
                 index.Add(element.NodeIds.IndexOf(node_id))
 
         for i in range(len(index)):
             # Assign elementnodal force reaction into node-specific vector
-            node_forces[count] = [0.0 for _ in range(3)]
             node_forces[count][0] = elem_force[3*index[i]]
             node_forces[count][1] = elem_force[3*index[i]+1]
             node_forces[count][2] = elem_force[3*index[i]+2]
             if is_ld_on:
-                # Assign elementnodal position vectors to pair with respective force reactions
-                node_positions[count] = [x*unit_scale for x in result_locdef.GetNodeValues(element.NodeIds[index[i]])] 
+                # Assign elementnodal position vectors to pair with respective 
+                # force reactions
+                node_positions[count] = [
+                    x*unit_scale for x in result_locdef.GetNodeValues(
+                        element.NodeIds[index[i]]
+                        )
+                ] 
             else:
                 node_positions[count] = [
                     mesh.NodeById(element.NodeIds[index[i]]).X, 
@@ -185,9 +202,21 @@ def calculate_moment(node_forces, node_positions, centroid, rotation_matrix):
     
     Args
     ---
-    
+    node_forces: n-length list of [Fx, Fy, Fz] values
+        force at each node in global coordinate system
+    node_positions: n-length list of [Ux, Uy, Uz] values
+        position of each node in global coordinate system (deflected value if 
+        NLGEOM=ON)
+    centroid: [Cx, Cy, Cz]
+        centroid about which to compute the moment 
+    rotation_matrix: 3x3 list of lists 
+        defines the mapping between the global and local coordinat systems
+
     Returns 
     ---
+    local_moment, r_max : [Mx, My, Mz], float 
+        moment in local coordinate system and the maximum distance value, for
+        use in plotting
     
     """
     
@@ -196,7 +225,7 @@ def calculate_moment(node_forces, node_positions, centroid, rotation_matrix):
     
     # Compute relative position after deflection (local r vector)
     # Also keep track of largest value for sizing the display vector
-    r = [None for _ in range(n_forces)] 
+    r = [[0.0 for _ in range(3)] for _ in range(n_forces)] 
     global_moment = [0.0, 0.0, 0.0]
     r_max = 0
     for f, force in enumerate(node_forces):
@@ -219,18 +248,28 @@ def calculate_moment(node_forces, node_positions, centroid, rotation_matrix):
     
     
 
-def process_interface(analysis, nodes, is_ld_on, unit_scale, local_csys):
-    """ Compute the reaction moment at an interface 
+def process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale):
+    """ Compute the reaction moment at an interface (i.e. boundary condition)
 
     Args
     ---
+    analysis: ANSYS ACT Analysis object
+    nodes: list[int]
+        node ids 
+    local_csys: ANSYS ACT Coordinate System object
+        local coordinate system definition 
+    is_ld_on : Bool
+        True if NLGEOM is set to ON, False otherwise
+    unit_scale: float 
+        scale factor for unit system 
+
 
     Returns
     ---
     [Mx, My, Mz] in global coordinate system
+
     """
 
-    # Unpack data related to the model 
     reader = analysis.GetResultsData()
     result_locdef = reader.GetResult("LOC_DEF") 
     result_enfo = reader.GetResult("ENFO")
@@ -240,7 +279,7 @@ def process_interface(analysis, nodes, is_ld_on, unit_scale, local_csys):
     n_nodes = len(nodes)
 
     # Node positions; this will become a list of 3-length lists
-    node_positions=[None for _ in range(n_nodes)] 
+    node_positions = [[0.0 for _ in range(3)] for _ in range(n_nodes)] 
 
     # Number of element ids is not known a priori 
     elem_ids = []
@@ -248,13 +287,17 @@ def process_interface(analysis, nodes, is_ld_on, unit_scale, local_csys):
     # Populate node positions array
     for i, node in enumerate(nodes):
         # Get all elements associated with nodes
-        elem_ids = elem_ids + [int(x) for x in mesh.NodeById(node).ConnectedElementIds] 
+        elem_ids += [int(x) for x in mesh.NodeById(node).ConnectedElementIds] 
         if is_ld_on:
             # Get nodal positions at load step
             node_positions[i] = [x * unit_scale for x in result_locdef.GetNodeValues(node)] 
         else:
             # Get nodal initial position  
-            node_positions[i] = [mesh.NodeById(node).X, mesh.NodeById(node).Y, mesh.NodeById(node).Z] 
+            node_positions[i] = [
+                mesh.NodeById(node).X, 
+                mesh.NodeById(node).Y, 
+                mesh.NodeById(node).Z
+            ] 
     
     # Find node centroid and remove duplicate elements from list 
     centroid = avg_disp(node_positions) 
@@ -266,8 +309,12 @@ def process_interface(analysis, nodes, is_ld_on, unit_scale, local_csys):
 
     # Retrieve the nodal forces and positions from the results file, then 
     # compute the moment in the specified local coordinate system 
-    node_forces, node_positions = get_elemnodal_data(mesh, result_enfo, result_locdef, n_forces, elem_ids, nodes, is_ld_on, unit_scale)
-    local_moment, r_max = calculate_moment(node_forces, node_positions, centroid, rotation_matrix)
+    node_forces, node_positions = get_elemnodal_data(
+        mesh, result_enfo, result_locdef, n_forces, elem_ids, nodes, is_ld_on, unit_scale
+    )
+    local_moment, r_max = calculate_moment(
+        node_forces, node_positions, centroid, rotation_matrix
+    )
 
     # Sign inverse for external force reaction 
     # (return the reaction force, which is opposite the internal force)
@@ -281,6 +328,16 @@ def process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scal
 
     Args
     ---
+    analysis: ANSYS ACT Analysis object
+    body: ANSYS ACT GeoData Body object
+    local_csys: ANSYS ACT Coordinate System object
+        local coordinate system definition  
+    is_ld_on : Bool
+        True if NLGEOM is set to ON, False otherwise
+    unit_scale: float 
+        scale factor for unit system 
+    model_scale: float 
+        scale factor for model unit system 
 
     Returns
     ---
@@ -335,22 +392,29 @@ def process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scal
                 
         # Only include unique nodes 
         positive_nodes = list(set(positive_nodes))
+
+    elem_ids = [elem.Id for elem in section_elements]
             
-    n_forces = get_n_elemnodal_forces(mesh, section_elements, positive_nodes)
-    node_forces, node_positions = get_elemnodal_data(mesh, result_enfo, result_locdef, n_forces, section_elements, positive_nodes, is_ld_on, unit_scale)
+    n_forces = get_n_elemnodal_forces(mesh, elem_ids, positive_nodes)
+    node_forces, node_positions = get_elemnodal_data(
+        mesh, result_enfo, result_locdef, n_forces, elem_ids, positive_nodes, is_ld_on, unit_scale
+    )
     centroid = avg_disp(node_positions)  
-    local_moment, r_max = calculate_moment(node_forces, node_positions, centroid, rotation_matrix)
+    local_moment, r_max = calculate_moment(
+        node_forces, node_positions, centroid, rotation_matrix
+    )
     
     # Sign inverse for external force reaction 
     # (return the reaction force, which is opposite the internal force)
     # TODO: should this be the same or opposite sign for section?
     local_moment = [m for m in local_moment] 
-    
-    
-#-------------------Main Fuction--------------------
 
+    return local_moment
+    
 
 def LDMProbe(result, stepInfo, collector):
+    """ Main function, called by the tree object
+    """
 
     # Initialize and collect objects and data
     analysis = result.Analysis
@@ -368,11 +432,10 @@ def LDMProbe(result, stepInfo, collector):
     
     nodes = collector.Ids
     
-
-    local_moment = []
+    # local_moment = [0.0, 0.0, 0.0]
 
     if mode == "Interface":
-        local_moment = process_interface(analysis, nodes, is_ld_on, unit_scale, local_csys)
+        local_moment = process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale, )
 
     elif mode == "Section":
         body = result.Properties["Geometry"].Value
@@ -384,7 +447,7 @@ def LDMProbe(result, stepInfo, collector):
         assert False 
 
     # Assign just the first node the result for display to the user
-    collector.SetValues(nodes[0], local_moment)
+    collector.SetValues(nodes[0], [local_moment[0], local_moment[1], local_moment[2]])
 
     # Set initial graphics for triad and vector
     if result.DisplayTime.Value == 0: 
