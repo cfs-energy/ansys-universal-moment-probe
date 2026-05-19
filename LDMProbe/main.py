@@ -320,7 +320,7 @@ def process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale):
     # (return the reaction force, which is opposite the internal force)
     local_moment = [-m for m in local_moment] 
 
-    return local_moment
+    return local_moment, r_max
 
 
 def process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scale):
@@ -409,7 +409,7 @@ def process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scal
     # TODO: should this be the same or opposite sign for section?
     local_moment = [m for m in local_moment] 
 
-    return local_moment
+    return local_moment, r_max
     
 
 def LDMProbe(result, stepInfo, collector):
@@ -429,17 +429,14 @@ def LDMProbe(result, stepInfo, collector):
 
     mode = result.Properties["Mode"].Value # "Interface" or "Section"
     local_csys = result.Properties["Orientation"].Value
-    
     nodes = collector.Ids
-    
-    # local_moment = [0.0, 0.0, 0.0]
 
     if mode == "Interface":
-        local_moment = process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale, )
+        local_moment, r_max = process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale)
 
     elif mode == "Section":
         body = result.Properties["Geometry"].Value
-        local_moment = process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scale)
+        local_moment, r_max = process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scale)
         
     else:
         # TODO: print error message to user 
@@ -458,6 +455,7 @@ def LDMProbe(result, stepInfo, collector):
         
     if stepInfo.Set == check: # Plot CS and M vector for selected time step display
         ExtAPI.Graphics.Scene.Clear()
+        plot_csys_and_vector(result, mode, local_csys, local_moment, r_max, model_scale)
 
     reader.Dispose()
 
