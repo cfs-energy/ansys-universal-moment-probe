@@ -156,8 +156,32 @@ def get_elemnodal_data(
     is_ld_on, 
     unit_scale
 ):
-    """ 
+    """ Get the forces and positions associated with a group of nodes 
+
+    Args 
+    ---
+    mesh: Ansys ACT Mesh object 
+    result_enfo: ANSYS ACT Result object 
+        element-nodal forces in the results database
+    result_locdef: ANSYS ACT Result object 
+        nodal displacements in the results database 
+    n_forces: int 
+        number of force result outputs 
+    elem_ids: list[int]
+        element ids corresponding to the group of elements to get results from
+    node_ids: list[int]
+        node ids at which data should be obtained 
+    is_ld_on: Bool
+        True if NLGEOM is set to ON, False otherwise 
+    unit_scale: float 
+        scaling for units 
+
+    Returns
+    --- 
+    (node_forces, node_positions): each a list of 3-length results vectors 
+        nodal forces and positions at the requested locations
     """
+    
     node_forces = [[0.0 for _ in range(3)] for _ in range(n_forces)]  
     node_positions = [[0.0 for _ in range(3)] for _ in range(n_forces)]
 
