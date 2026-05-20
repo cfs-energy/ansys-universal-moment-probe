@@ -621,21 +621,20 @@ def geoCheck(result, prop):
         True, if mode is "Section" and geometry is a body
         False, otherwise
     """
+
+    if prop.Value is None: 
+        return False
     
     is_mode_interface = result.Properties["Mode"].Value == "Interface"
     is_mode_section = result.Properties["Mode"].Value == "Section"
     is_geom_face = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoFace
     is_geom_body = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoBody
         
-    if prop.Value is not None: 
-        if is_mode_interface and is_geom_face:
-            return True 
-        
-        elif is_mode_section and is_geom_body:
-            return True 
-            
-        else: 
-            return False
+    if is_mode_interface and is_geom_face:
+        return True 
     
-    else:
-        return False 
+    elif is_mode_section and is_geom_body:
+        return True 
+        
+    else: 
+        return False
