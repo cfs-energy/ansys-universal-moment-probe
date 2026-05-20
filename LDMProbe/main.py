@@ -475,7 +475,7 @@ def LDMProbe(result, stepInfo, collector):
     else:
         check = result.DisplayTime.Value
         
-    if stepInfo.Set == check: # Plot CS and M vector for selected time step display
+    if stepInfo.Time == check: # Plot CS and M vector for selected time step display
         ExtAPI.Graphics.Scene.Clear()
         plot_csys_and_vector(result, mode, local_csys, local_moment, r_max, model_scale)
 
