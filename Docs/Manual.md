@@ -12,11 +12,11 @@ When Large Deflection (NLGEOM) is on, the standard ANSYS Moment Probe will calcu
 
 ## Instructions for Use 
 
-Adding the Any Moment Probe to your tree can be done in two ways:  
+Adding the Any Moment Probe to your Tree can be done in two ways:  
 1. Large Deflection tab (Ribbon) > Any Moment Probe
 2. Right click on Solution (Tree) > Insert > Large Deflection > Any Moment Probe
 
-Once added into the tree, this result object works similarly to other result objects. In the details menu, select the options you want and then evaluate results as you normally would.
+Once added into the Tree, this result object works similarly to other result objects. In the details menu, select the options you want and then evaluate results as you normally would.
 
 <p align="center" width="100%">
   <img src="img/detail.png" alt="radius1" width="30%" align="center"/>
@@ -32,7 +32,7 @@ Once added into the tree, this result object works similarly to other result obj
 2. Section: one body. 
 
 ### Result Data and Graphics 
-This extension is a Vector Nodal result object (see LMDProbe.xml result definition), meaning that when evaluating results, Mechanical sends nodal data through the collector to be used by the python ACT script. Nodal information is needed in order to obtain node locations and forces required to solve for their contributions to total moment. The collector also expects the data returning to Mechanical to be nodal (i.e. distinct values for each node) to be plotted as a vector map. For this application, however, a map of individual nodal moment vectors would not be useful, and only one (total) value is the desired output. That value is returned only into one node via the collector. This has two minor implications to the user experience. 
+This extension is a Vector Nodal result object (see LDMProbe.xml result definition), meaning that when evaluating results, Mechanical sends nodal data through the collector to be used by the python ACT script. Nodal information is needed in order to obtain node locations and forces required to solve for their contributions to total moment. The collector also expects the data returning to Mechanical to be nodal (i.e. distinct values for each node) to be plotted as a vector map. For this application, however, a map of individual nodal moment vectors would not be useful, and only one (total) value is the desired output. That value is returned only into one node via the collector. This has two minor implications to the user experience. 
 #### 1. Data Table   
 In a full array of nodal results Ansys normally provides the Min, Max, and Average values of the data for a given time step. Since here only one value is returned, the Min, Max, and Average are all the same. As shown in the table below, the values are identical in each three column groups (X, Y, Z).
 
@@ -40,19 +40,18 @@ In a full array of nodal results Ansys normally provides the Min, Max, and Avera
   <img src="img/datatable.png" alt="radius1" width="100%" align="center"/>
 </p>
 
-#### 2. Graphical Representation
+#### 2. Graphics
 
 As mentioned above, for a Vector Nodal result objects, Ansys expects to plot nodal vectors- something that would not be helpful to the user in this case. However, since only one node receives data back from the python script (and that being the total moment vector), Ansys defaults to displaying that vector at the location of the node to which is assigned. There are two problems with this: first that none of the nodes may be near enough to the scoped CS, and second that the values returned are in the orientation of the scoped CS and Ansys will plot them in Global.  
 
 To get around this issue, and to provide a graphical display that is useful to the users, this extension has functions that are triggered using distinct callbacks:  
 
-- During result evaluation and whenever the result is selected in the tree:  
+- During result evaluation and whenever the result is selected in the Tree:  
   1. In the Result Tab Vector Display section:  
     1.1 Vector display on  
     1.2 Origin (no arrow form)  
     1.3 Sizing scale set to min (left)
-  2. Display custom Triad at scoped CS position/orientation.
-  3. Display custom vector rotated to reflect moment vector in local CS.  
+  2. Display custom Triad and Vector at desired position/orientation (see [Triad and Vector Display](#triad-and-vector-display)).
 
 - Whenever the result is un-selected:
   1. Clear all custom graphics. 
@@ -72,7 +71,7 @@ The result is shown below, the "vector" Ansys wants to display is relegated to a
     2.2 Large Deflection = “Off”, uses initial Node position.  
 3. All Elements associated with Nodes are collected.   
 4. Element-Nodal reaction loads (“ENFO”) for each Element are collected (F).  
-5. For each Node (from nodes collected in [1.]) within each Element, the position vector (r) is determined with respect to the centroid of the Nodes:  
+5. For each Node (from nodes collected in [1.]) within each Element, the position vector (r) is determined with respect to the **centroid of the Nodes**:  
     5.1  Large Deflection = “On”: uses “LOC_DEF”.  
     5.2 Large Deflection = “Off”, uses initial Node position.  
 6. For each Node* within each Element, a moment (M) is calculated about the displaced centroid by M=rxF. 
@@ -94,6 +93,20 @@ This mode follows a similar process to the Interface Mode, except that the nodes
 **NOTE**: Orientation coordinate system is not used as the point of moment summation, but only for section location and result orientation.
 
 **NOTE**: The output data table will include a Maximum, Minimum, and Total columns for each component. These values will all the identical and the Total column should not be confused with a vector sum. 
+
+### Triad and Vector Display
+
+The method used here for visually representing the total moment vector is not dynamic (i.e. not tied to mesh deformation scales), and requires a set position to display each time the object is selected in the Tree. The initial solve of the probe stores data (via hidden properties in the Details Menu) that can later be accessed for an on-click callback. In the current release, this data is limited to the moment vector and a size scale (the distance from the nodal centroid to the furthest node). 
+
+The triad and vector are displayed based on the following logic:
+- Interface Mode: at the centroid of the face(s) scoped
+- Section Mode: at the origin of the selected orientation system.      
+
+There are two notable points to consider: 
+1. The triad and vector are not actually positioned on the center about which moments are calculated (nodal centroid).
+2. The triad and vector are not displayed in the deformed position from which the moments are calculated when NLGEOM = On.
+
+Both of these points can be subjects of later improvements (e.g. added property dropdowns), as they do not impact the correctness of the results, except maybe in such a case where the desired output moment is not determined on a centroid basis.  
 
 ## Example Case
 
