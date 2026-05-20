@@ -431,11 +431,6 @@ def process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, mo
         node_forces, node_positions, centroid, rotation_matrix
     )
     
-    # Sign inverse for external force reaction 
-    # (return the reaction force, which is opposite the internal force)
-    # TODO: should this be the same or opposite sign for section?
-    local_moment = [m for m in local_moment] 
-
     return local_moment, r_max
     
 
