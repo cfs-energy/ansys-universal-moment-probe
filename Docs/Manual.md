@@ -62,7 +62,6 @@ The result is shown below, the "vector" Ansys wants to display is relegated to a
   <img src="img/sphere.png" alt="radius1" width="50%" align="center"/>
 </p>
 
-
 ## Core Process Outline
 ### Interface Mode
 1. Nodes collected from scoped Face.  
