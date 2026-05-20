@@ -275,12 +275,13 @@ def calculate_moment(node_forces, node_positions, centroid, rotation_matrix):
     
     
 
-def process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale):
+def process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale):
     """ Compute the reaction moment at an interface (i.e. boundary condition)
 
     Args
     ---
     analysis: ANSYS ACT Analysis object
+    reader: ANSYS ACT Reader object
     nodes: list[int]
         node ids 
     local_csys: ANSYS ACT Coordinate System object
@@ -297,7 +298,6 @@ def process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale):
 
     """
 
-    reader = analysis.GetResultsData()
     result_locdef = reader.GetResult("LOC_DEF") 
     result_enfo = reader.GetResult("ENFO")
     mesh = analysis.MeshData 
@@ -350,12 +350,13 @@ def process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale):
     return local_moment, r_max
 
 
-def process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scale):
+def process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, model_scale):
     """ Compute the moment carried by a solid cross-section
 
     Args
     ---
     analysis: ANSYS ACT Analysis object
+    reader: ANSYS ACT Reader object
     body: ANSYS ACT GeoData Body object
     local_csys: ANSYS ACT Coordinate System object
         local coordinate system definition  
@@ -372,7 +373,6 @@ def process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scal
 
     """
 
-    reader = analysis.GetResultsData()
     mesh = analysis.MeshData
     body_elements = mesh.MeshRegionById(body.Ids[0]).Elements
     n_body_elements = len(body_elements)
@@ -459,11 +459,11 @@ def LDMProbe(result, stepInfo, collector):
     nodes = collector.Ids
 
     if mode == "Interface":
-        local_moment, r_max = process_interface(analysis, nodes, local_csys, is_ld_on, unit_scale)
+        local_moment, r_max = process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale)
 
     elif mode == "Section":
         body = result.Properties["Geometry"].Value
-        local_moment, r_max = process_section(analysis, body, local_csys, is_ld_on, unit_scale, model_scale)
+        local_moment, r_max = process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, model_scale)
         
     else:
         # TODO: print error message to user 
