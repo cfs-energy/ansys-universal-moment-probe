@@ -2,8 +2,16 @@
 
 [Purpose](#purpose)  
 [Instructions for Use](#instructions-for-use)  
+&emsp;[Details Menu](#details-menu)  
+&emsp;[Result Data and Graphics](#result-data-and-graphics)  
 [Core Process Outline](#core-process-outline)  
-[Example Case](#example-case)
+&emsp;[Interface Mode](#interface-mode)  
+&emsp;[Section Mode](#section-mode)  
+&emsp;[Triad and Vector Display](#triad-and-vector-display)  
+[Example Case](#example-case)  
+&emsp;[Model Setup and Results](#model-setup-and-results)  
+&emsp;[Discussion](#discussion)  
+&emsp;[Conclusion](#conclusion)  
 
 ## Purpose
 When Large Deflection (NLGEOM) is on, the standard ANSYS Moment Probe will calculate the moment about the undeformed position of the scoped geometry, with the nodal forces at the displaced nodal positions. This means that the resultant moments will have fictitious moment arms and the values incorrect. This installable adds a Tree Object result into the Solution right-click menu, designed to replicate the functionality of the built-in Moment Probe, but with compensation for nodal displacements when Large Deflection is set to “On”. 
@@ -12,6 +20,7 @@ When Large Deflection (NLGEOM) is on, the standard ANSYS Moment Probe will calcu
 
 ## Instructions for Use 
 
+### Details Menu
 Adding the Any Moment Probe to your Tree can be done in two ways:  
 1. Large Deflection tab (Ribbon) > Any Moment Probe
 2. Right click on Solution (Tree) > Insert > Large Deflection > Any Moment Probe
