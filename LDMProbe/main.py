@@ -331,7 +331,7 @@ def process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale)
     elem_ids=list(set(elem_ids)) 
 
     # Count the number of nodes that the result should be summed over 
-    # This will be n_nodes_per_element * n_elements 
+    # This will be each node in nodes * each element it is associated with 
     n_forces = get_n_elemnodal_forces(mesh, elem_ids, nodes)  
 
     # Retrieve the nodal forces and positions from the results file, then 
@@ -420,13 +420,37 @@ def process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, mo
         # Only include unique nodes 
         positive_nodes = list(set(positive_nodes))
 
+    n_nodes = len(positive_nodes)
+
+    # Node positions; this will become a list of 3-length lists
+    node_positions = [[0.0 for _ in range(3)] for _ in range(n_nodes)] 
+
+    # Populate node positions array
+    for i, node in enumerate(positive_nodes):
+        if is_ld_on:
+            # Get nodal positions at load step
+            node_positions[i] = [x * unit_scale for x in result_locdef.GetNodeValues(node)] 
+        else:
+            # Get nodal initial position  
+            node_positions[i] = [
+                mesh.NodeById(node).X, 
+                mesh.NodeById(node).Y, 
+                mesh.NodeById(node).Z
+            ] 
+
+    # Find node centroid and collect section element ids
+    centroid = avg_disp(node_positions)  
     elem_ids = [elem.Id for elem in section_elements]
-            
+
+    # Count the number of nodes that the result should be summed over 
+    # This will be each node in nodes * each element it is associated with            
     n_forces = get_n_elemnodal_forces(mesh, elem_ids, positive_nodes)
+
+    # Retrieve the nodal forces and positions from the results file, then 
+    # compute the moment in the specified local coordinate system 
     node_forces, node_positions = get_elemnodal_data(
         mesh, result_enfo, result_locdef, n_forces, elem_ids, positive_nodes, is_ld_on, unit_scale
     )
-    centroid = avg_disp(node_positions)  
     local_moment, r_max = calculate_moment(
         node_forces, node_positions, centroid, rotation_matrix
     )
@@ -475,7 +499,7 @@ def LDMProbe(result, stepInfo, collector):
     else:
         check = result.DisplayTime.Value
         
-    if stepInfo.Set == check: # Plot CS and M vector for selected time step display
+    if stepInfo.Time == check: # Plot CS and M vector for selected time step display
         ExtAPI.Graphics.Scene.Clear()
         plot_csys_and_vector(result, mode, local_csys, local_moment, r_max, model_scale)
 
