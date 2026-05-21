@@ -1,5 +1,5 @@
 <extension version="1" minorversion="0" name="LDMProbe">
-<guid shortid="LDMProbe">B80251F5-CBB0-42E8-9841-0F4B58905F55</guid>
+<guid shortid="LDMProbe">d7121d1d-28cb-4a8f-b4ee-41dcfa67d59a</guid>
 <script src="main.py" compiled="true"/>
 <interface context="Mechanical">
 	<toolbar name="Large_Deflection" caption="Large Deflection">

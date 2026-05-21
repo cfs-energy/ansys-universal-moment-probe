@@ -1,262 +1,610 @@
+""" Large Displacement Moment Probe for ANSYS Mechanical
+    (c) 2026 Yair Preiss
+
+See README and Docs/Manual.md for installation and usage instructions.
+"""
+
 import units
-import math
+from math import sqrt, pi, atan2
 from System.Collections.Generic import List
 from System import Array
 
-#-------------------Helper Functions--------------------
 
-#Vector magnitude
-def mag(a):         
-    b=sqrt(a[0]**2.0+a[1]**2.0+a[2]**2.0)
+def mag(a):
+    """ Return the vector magnitude (norm) of a 3-length list"""  
+    
+    b = sqrt(a[0]**2.0 + a[1]**2.0 + a[2]**2.0)
+    
     return b
+    
 
-#Spatial Transformation Matrix [4x4]
-def STM(x,y,z):      
-    M=Array.CreateInstance(float,16)
+def create_stm(x, y, z):  
+    """ Create a 4x4 spatial transformation matrix 
+    
+    The spatial transformation matrix maps the effect of a 
+    rotation on a vector x, i.e. [M] * x = y. For this implementation,
+    translations are not considered.
+    
+    | x0 x1 x2 0 |
+    | y0 y1 y2 0 |
+    | z0 z1 z2 0 |
+    |  0  0  0 1 |
+    
+    Args
+    ---
+    x, y, z: the 3-length rows of the spatial transformation matrix 
+        corresponding to the direction of each axis in the global system
+    
+    Returns
+    ---
+    4x4 transformation matrix as a linear array in row-major format 
+    
+    """
+    
+    matrix = Array.CreateInstance(float,16)
+    
     for i in range(3):
-        M[i]=x[i]
-        M[i+4]=y[i]
-        M[i+8]=z[i]
-        M[i+12]=0.0
-    M[3]=0.0
-    M[7]=0.0
-    M[11]=0
-    M[15]=1.0
-    return M        
+        matrix[i] = x[i]
+        matrix[i+4] = y[i]
+        matrix[i+8] = z[i]
+        matrix[i+12] = 0.0
+        
+    matrix[3] = 0.0
+    matrix[7] = 0.0
+    matrix[11] = 0
+    matrix[15] = 1.0
+    
+    return matrix        
 
-#Vector cross product
-def cross(a,b):     
+
+def cross(a, b):     
+    """ Return the cross product of two 3-length lists (vectors)
+    """
+    
     c = [a[1]*b[2] - a[2]*b[1],
-            a[2]*b[0] - a[0]*b[2],
-            a[0]*b[1] - a[1]*b[0]]
+         a[2]*b[0] - a[0]*b[2],
+         a[0]*b[1] - a[1]*b[0]]
+         
     return c
 
-#Coordinate transformation
-def transform(m,v): 
-    c=[None]*3
+
+def transform(matrix, vector): 
+    """ Compute a coordinate transform using the rotation matrix 
+    embedded with a transformation matrix
+    """
+    coordinates = [0.0, 0.0, 0.0]
+    
     for i in range(3):
-        sum=0
         for j in range(3):
-            sum = sum + m[i][j]*v[j]
-        c[i]=sum
-    return c
+            coordinates[i] += matrix[i][j]*vector[j]
+            
+    return coordinates
 
- #Vector sum
+
 def vsum(a,b):     
-    c=[b[0]+a[0],b[1]+a[1],b[2]+a[2]]
+    """ Compute the element-wise sum of two vectors, returning a new vector
+    """
+    
+    c = [b[0] + a[0], b[1] + a[1], b[2] + a[2]]
     return c
 
-#Average displacements
-def ave_disp(points): 
+
+def avg_disp(points): 
+    """ Compute the average displacement within a group of points 
+    
+    Args 
+    ---
+    points: list of 3-length lists corresponding to the point coordinates
+    
+    Returns 
+    ---
+    list: 3-length vector of x,y,z displacement coordinates 
+    """
+    
     n = len(points)
-    disp = [sum(coord) / n for coord in zip(*points)] 
+    disp = [sum(coord) / n for coord in zip(*points)]
     return disp
 
-#-------------------Main Fuction--------------------
 
-def LDMProbe(result,stepInfo,collector):
+def rotation_matrix_from_local_csys(local_csys): 
+    """ Return a rotation matrix given a local coordinate system """
 
-    #Initialize and collect objects and data
+    return [local_csys.XAxis, local_csys.YAxis, local_csys.ZAxis]
+
+
+def get_scale(analysis, is_ld_on):
+    """ Get the scalar factors associated with solver and model units """
+
+    reader = analysis.GetResultsData()
+    model_units = ExtAPI.DataModel.GeoData.Unit 
+    result_locdef = reader.GetResult("LOC_DEF")
+    solve_units = result_locdef.GetComponentInfo('X').Unit
+    model_scale = units.ConvertToUserUnit(ExtAPI, 1, model_units, "Length")
+
+    if is_ld_on:
+        unit_scale = units.ConvertUnit(1, solve_units, model_units,"Length")
+    
+    else:
+        unit_scale = 1.0
+
+    return unit_scale, model_scale
+
+
+def get_n_elemnodal_forces(mesh, elem_ids, node_ids):
+    """ Get the number of elemnodal force results required, by determining which
+    nodes are associated with the elements
+    """
+    count = 0 
+
+    for elem_id in elem_ids:
+        element = mesh.ElementById(elem_id)
+        for node_id in node_ids:
+            if element.NodeIds.IndexOf(node_id) >= 0: 
+                # Nodes attached to the element have a positive index
+                count += 1
+    
+    return count
+
+
+def get_elemnodal_data(
+    mesh, 
+    result_enfo, 
+    result_locdef,
+    n_forces, 
+    elem_ids, 
+    node_ids, 
+    is_ld_on, 
+    unit_scale
+):
+    """ Get the forces and positions associated with a group of nodes 
+
+    Args 
+    ---
+    mesh: Ansys ACT Mesh object 
+    result_enfo: ANSYS ACT Result object 
+        element-nodal forces in the results database
+    result_locdef: ANSYS ACT Result object 
+        nodal displacements in the results database 
+    n_forces: int 
+        number of force result outputs 
+    elem_ids: list[int]
+        element ids corresponding to the group of elements to get results from
+    node_ids: list[int]
+        node ids at which data should be obtained 
+    is_ld_on: Bool
+        True if NLGEOM is set to ON, False otherwise 
+    unit_scale: float 
+        scaling for units 
+
+    Returns
+    --- 
+    (node_forces, node_positions): each a list of 3-length results vectors 
+        nodal forces and positions at the requested locations
+    """
+    
+    node_forces = [[0.0 for _ in range(3)] for _ in range(n_forces)]  
+    node_positions = [[0.0 for _ in range(3)] for _ in range(n_forces)]
+
+    count = 0
+    for Id in elem_ids:
+        element = mesh.ElementById(Id)
+        # elementnodal force reactions are reported in a row-major linear array, 
+        # with each [Fx1, Fy1, Fz1, Fx2, Fy2, Fz3, ... Fzn], not as individual vectors
+        elem_force = result_enfo.GetElementValues(Id) 
+        index = List[object]()
+
+        # TODO: this is repeated work, we could just associate node ids 
+        # with the element id
+        for node_id in node_ids:
+            if element.NodeIds.IndexOf(node_id) >= 0:
+                index.Add(element.NodeIds.IndexOf(node_id))
+
+        for i in range(len(index)):
+            # Assign elementnodal force reaction into node-specific vector
+            node_forces[count][0] = elem_force[3*index[i]]
+            node_forces[count][1] = elem_force[3*index[i]+1]
+            node_forces[count][2] = elem_force[3*index[i]+2]
+            if is_ld_on:
+                # Assign elementnodal position vectors to pair with respective 
+                # force reactions
+                node_positions[count] = [
+                    x*unit_scale for x in result_locdef.GetNodeValues(
+                        element.NodeIds[index[i]]
+                        )
+                ] 
+            else:
+                node_positions[count] = [
+                    mesh.NodeById(element.NodeIds[index[i]]).X, 
+                    mesh.NodeById(element.NodeIds[index[i]]).Y, 
+                    mesh.NodeById(element.NodeIds[index[i]]).Z
+                ]
+            count += 1
+
+    return node_forces, node_positions
+
+
+def calculate_moment(node_forces, node_positions, centroid, rotation_matrix):
+    """ Compute the moment caused by a collection of nodal forces about a 
+    specified centroid, in a local coordinate system
+    
+    Args
+    ---
+    node_forces: n-length list of [Fx, Fy, Fz] values
+        force at each node in global coordinate system
+    node_positions: n-length list of [Ux, Uy, Uz] values
+        position of each node in global coordinate system (deflected value if 
+        NLGEOM=ON)
+    centroid: [Cx, Cy, Cz]
+        centroid about which to compute the moment 
+    rotation_matrix: 3x3 list of lists 
+        defines the mapping between the global and local coordinat systems
+
+    Returns 
+    ---
+    local_moment, r_max : [Mx, My, Mz], float 
+        moment in local coordinate system and the maximum distance value, for
+        use in plotting
+    
+    """
+    
+    n_forces = len(node_forces) 
+    assert n_forces == len(node_positions) 
+    
+    # Compute relative position after deflection (local r vector)
+    # Also keep track of largest value for sizing the display vector
+    r = [[0.0 for _ in range(3)] for _ in range(n_forces)] 
+    global_moment = [0.0, 0.0, 0.0]
+    r_max = 0
+    for f, force in enumerate(node_forces):
+        r[f] = [
+            node_positions[f][0] - centroid[0],
+            node_positions[f][1] - centroid[1],
+            node_positions[f][2] - centroid[2] 
+        ]
+        if mag(r[f]) > r_max:
+            r_max = mag(r[f]) 
+
+        # Sum all M=rxF products in Global orientation (default solver reporting)
+        # TODO: logic here could be improved?
+        global_moment = vsum(global_moment, cross(r[f], force)) 
+
+    # Transform M into selected CS orientation 
+    local_moment = transform(rotation_matrix, global_moment) 
+    
+    return local_moment, r_max 
+    
+    
+
+def process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale):
+    """ Compute the reaction moment at an interface (i.e. boundary condition)
+
+    Args
+    ---
+    analysis: ANSYS ACT Analysis object
+    reader: ANSYS ACT Reader object
+    nodes: list[int]
+        node ids 
+    local_csys: ANSYS ACT Coordinate System object
+        local coordinate system definition 
+    is_ld_on : Bool
+        True if NLGEOM is set to ON, False otherwise
+    unit_scale: float 
+        scale factor for unit system 
+
+
+    Returns
+    ---
+    [Mx, My, Mz] in global coordinate system
+
+    """
+
+    result_locdef = reader.GetResult("LOC_DEF") 
+    result_enfo = reader.GetResult("ENFO")
+    mesh = analysis.MeshData 
+    rotation_matrix = rotation_matrix_from_local_csys(local_csys)
+    
+    n_nodes = len(nodes)
+
+    # Node positions; this will become a list of 3-length lists
+    node_positions = [[0.0 for _ in range(3)] for _ in range(n_nodes)] 
+
+    # Number of element ids is not known a priori 
+    elem_ids = []
+
+    # Populate node positions array
+    for i, node in enumerate(nodes):
+        # Get all elements associated with nodes
+        elem_ids += [int(x) for x in mesh.NodeById(node).ConnectedElementIds] 
+        if is_ld_on:
+            # Get nodal positions at load step
+            node_positions[i] = [x * unit_scale for x in result_locdef.GetNodeValues(node)] 
+        else:
+            # Get nodal initial position  
+            node_positions[i] = [
+                mesh.NodeById(node).X, 
+                mesh.NodeById(node).Y, 
+                mesh.NodeById(node).Z
+            ] 
+    
+    # Find node centroid and remove duplicate elements from list 
+    centroid = avg_disp(node_positions) 
+    elem_ids=list(set(elem_ids)) 
+
+    # Count the number of nodes that the result should be summed over 
+    # This will be each node in nodes * each element it is associated with 
+    n_forces = get_n_elemnodal_forces(mesh, elem_ids, nodes)  
+
+    # Retrieve the nodal forces and positions from the results file, then 
+    # compute the moment in the specified local coordinate system 
+    node_forces, node_positions = get_elemnodal_data(
+        mesh, result_enfo, result_locdef, n_forces, elem_ids, nodes, is_ld_on, unit_scale
+    )
+    local_moment, r_max = calculate_moment(
+        node_forces, node_positions, centroid, rotation_matrix
+    )
+
+    # Sign inverse for external force reaction 
+    # (return the reaction force, which is opposite the internal force)
+    local_moment = [-m for m in local_moment] 
+
+    return local_moment, r_max
+
+
+def process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, model_scale):
+    """ Compute the moment carried by a solid cross-section
+
+    Args
+    ---
+    analysis: ANSYS ACT Analysis object
+    reader: ANSYS ACT Reader object
+    body: ANSYS ACT GeoData Body object
+    local_csys: ANSYS ACT Coordinate System object
+        local coordinate system definition  
+    is_ld_on : Bool
+        True if NLGEOM is set to ON, False otherwise
+    unit_scale: float 
+        scale factor for unit system 
+    model_scale: float 
+        scale factor for model unit system 
+
+    Returns
+    ---
+    [Mx, My, Mz] in global coordinate system
+
+    """
+
+    mesh = analysis.MeshData
+    body_elements = mesh.MeshRegionById(body.Ids[0]).Elements
+    n_body_elements = len(body_elements)
+    result_locdef = reader.GetResult("LOC_DEF") 
+    result_enfo = reader.GetResult("ENFO")
+    rotation_matrix = rotation_matrix_from_local_csys(local_csys)
+    origin = local_csys.Origin
+
+    Min=[100000 for _ in range(n_body_elements)] 
+    Max=[0 for _ in range(n_body_elements)] 
+
+    # Elements in section and nodes on positive side of section (+Z)
+    section_elements = [] 
+    positive_nodes = [] 
+
+    # Identify section elements containing nodes in +Z and -Z 
+    for e, element in enumerate(body_elements): 
+        for node in element.Nodes:
+            r = [
+                model_scale*node.X - origin[0], 
+                model_scale*node.Y - origin[1], 
+                model_scale*node.Z - origin[2]
+            ]
+            loc = transform(rotation_matrix, r)
+            z_loc = loc[2]
+            if z_loc < Min[e]: 
+                Min[e] = z_loc
+            if z_loc > Max[e]: 
+                Max[e] = z_loc
+            
+        if Min[e] < 0 and Max[e] > 0: 
+            section_elements.append(element)
+            
+    # Identify positive nodes from section elements
+    for element in section_elements: 
+        for node in element.Nodes:
+            r = [
+                model_scale*node.X - origin[0],
+                model_scale*node.Y - origin[1],
+                model_scale*node.Z - origin[2]]
+            loc = transform(rotation_matrix, r)
+            if loc[2] > 0:
+                positive_nodes.append(node.Id)
+                
+        # Only include unique nodes 
+        positive_nodes = list(set(positive_nodes))
+
+    n_nodes = len(positive_nodes)
+
+    # Node positions; this will become a list of 3-length lists
+    node_positions = [[0.0 for _ in range(3)] for _ in range(n_nodes)] 
+
+    # Populate node positions array
+    for i, node in enumerate(positive_nodes):
+        if is_ld_on:
+            # Get nodal positions at load step
+            node_positions[i] = [x * unit_scale for x in result_locdef.GetNodeValues(node)] 
+        else:
+            # Get nodal initial position  
+            node_positions[i] = [
+                mesh.NodeById(node).X, 
+                mesh.NodeById(node).Y, 
+                mesh.NodeById(node).Z
+            ] 
+
+    # Find node centroid and collect section element ids
+    centroid = avg_disp(node_positions)  
+    elem_ids = [elem.Id for elem in section_elements]
+
+    # Count the number of nodes that the result should be summed over 
+    # This will be each node in nodes * each element it is associated with            
+    n_forces = get_n_elemnodal_forces(mesh, elem_ids, positive_nodes)
+
+    # Retrieve the nodal forces and positions from the results file, then 
+    # compute the moment in the specified local coordinate system 
+    node_forces, node_positions = get_elemnodal_data(
+        mesh, result_enfo, result_locdef, n_forces, elem_ids, positive_nodes, is_ld_on, unit_scale
+    )
+    local_moment, r_max = calculate_moment(
+        node_forces, node_positions, centroid, rotation_matrix
+    )
+    
+    return local_moment, r_max
+    
+
+def LDMProbe(result, stepInfo, collector):
+    """ Main function, called by the tree object
+    """
+
+    # Initialize and collect objects and data
     analysis = result.Analysis
     reader = analysis.GetResultsData()
-    solved_steps=reader.ListTimeFreq
+    reader.CurrentResultSet = stepInfo.Set
+    solved_steps = reader.ListTimeFreq
     if stepInfo.Time not in solved_steps:
         return
-    mesh = analysis.MeshData
-    modunits = ExtAPI.DataModel.GeoData.Unit
-    LD=analysis.AnalysisSettings.PropertyByName('UseLargeDeformation').StringValue
-    LOCDEF = reader.GetResult("LOC_DEF") 
-    F = reader.GetResult("ENFO")
-    mode = result.Properties["Mode"].Value
-    CS = result.Properties["Orientation"].Value
-    solve_unit = LOCDEF.GetComponentInfo('X').Unit
-    mod_scale = units.ConvertToUserUnit(ExtAPI,1,modunits,"Length")
-    if LD=="On": 
-        sol_scale = units.ConvertUnit(1,solve_unit,modunits,"Length") # Set scale factor between Solver Units and Model Units
-    reader.CurrentResultSet = stepInfo.Set
+
+    is_ld_on = analysis.AnalysisSettings.PropertyByName('UseLargeDeformation').StringValue == "On"
+    unit_scale, model_scale = get_scale(analysis, is_ld_on)
+
+    mode = result.Properties["Mode"].Value # "Interface" or "Section"
+    local_csys = result.Properties["Orientation"].Value
     nodes = collector.Ids
-    rot = [CS.XAxis,CS.YAxis,CS.ZAxis]
 
-    #Begin processing
     if mode == "Interface":
-        n = len(nodes)
-        n_pos=[None]*n 
-        elementIds = []
-        for i, node in enumerate(nodes):
-            elementIds = elementIds+[int(x) for x in mesh.NodeById(node).ConnectedElementIds] # Get all elements associated with nodes
-            if LD=="On":
-                n_pos[i] = [x*sol_scale for x in LOCDEF.GetNodeValues(node)] # Get nodal positions at load step
-            if LD=="Off":
-                n_pos[i] = [mesh.NodeById(node).X, mesh.NodeById(node).Y, mesh.NodeById(node).Z] # Get nodal initial position  
-        CG = ave_disp(n_pos) # Determine nodal centroid
-        elementIds=list(set(elementIds)) # Remove duplicate elements from list 
-        F_count = 0
-        for Id in elementIds:
-            element = mesh.ElementById(Id)
-            for node in nodes:
-                if element.NodeIds.IndexOf(node)>=0: # Index will be -1 for nodes NOT in element
-                    F_count = F_count+1 # Count number of elementnodal forces needed to resolve moment (each node, once per element)
-        F_nodes = [None]*F_count
-        n_pos = [None]*F_count
-        count = 0
-        for Id in elementIds:
-            element = mesh.ElementById(Id)
-            F_element = F.GetElementValues(Id) # elementnodal force reactions are reported in one long list with each [Fx1, Fy1, Fz1, Fx2, Fy2, Fz3, ... Fzn], not as individual vectors
-            index = List[object]()
-            for node in nodes:
-                if element.NodeIds.IndexOf(node)>=0:
-                    index.Add(element.NodeIds.IndexOf(node))
-            for i in range(len(index)):
-                F_nodes[count]=[None]*3 # Assign elementnodal force reaction into node-specific vector
-                F_nodes[count][0] = F_element[3*index[i]]
-                F_nodes[count][1] = F_element[3*index[i]+1]
-                F_nodes[count][2] = F_element[3*index[i]+2]
-                if LD=="On":
-                    n_pos[count] = [x*sol_scale for x in LOCDEF.GetNodeValues(element.NodeIds[index[i]])] # Assign elementnodal position vectors to pair with respective force reactions
-                if LD=="Off":
-                    n_pos[count] = [mesh.NodeById(element.NodeIds[index[i]]).X, mesh.NodeById(element.NodeIds[index[i]]).Y, mesh.NodeById(element.NodeIds[index[i]]).Z]
-                count = count+1    
-        r = [None]*F_count 
-        Global_M = [0.0,0.0,0.0]
-        r_max = 0
-        for f, force in enumerate(F_nodes):
-            r[f] = [(n_pos[f][0]-CG[0]),(n_pos[f][1]-CG[1]),(n_pos[f][2]-CG[2])] # Determine loacal r vector
-            if mag(r[f]) > r_max:
-                r_max = mag(r[f])
-            Global_M = vsum(Global_M,cross(r[f],force)) # Sum all M=rxF products in Global orientation (default solver reporting)
-        Local_M = transform(rot,Global_M) # Transform M into selected CS orientation 
-        Local_M = [-m for m in Local_M] # Sign inverse for external force Reaction.
-    
-    if mode == "Section":
+        local_moment, r_max = process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale)
+
+    elif mode == "Section":
         body = result.Properties["Geometry"].Value
-        totelement = mesh.MeshRegionById(body.Ids[0]).Elements
-        Min=[100000 for l in range(len(totelement))] # Initialize Min check value
-        Max=[0 for l in range(len(totelement))] # Initialize Max check value
-        secelement = [] # Elements in section
-        posnode = [] # Nodes on positive side of section (+Z)
-        for e,element in enumerate(totelement): # Identify section elements containing nodes in +Z and -Z 
-            for node in element.Nodes:
-                o = [mod_scale*node.X-CS.Origin[0],mod_scale*node.Y-CS.Origin[1],mod_scale*node.Z-CS.Origin[2]]
-                loc = transform(rot,o)
-                z_loc = loc[2]
-                if z_loc<Min[e]: Min[e]=z_loc
-                if z_loc>Max[e]: Max[e]=z_loc
-            if Min[e]<0 and Max[e]>0: 
-                secelement.Add(element)
-        for element in secelement: # Identify positive nodes from section elements
-            for node in element.Nodes:
-                o = [mod_scale*node.X-CS.Origin[0],mod_scale*node.Y-CS.Origin[1],mod_scale*node.Z-CS.Origin[2]]
-                loc = transform(rot,o)
-                if loc[2]>0:
-                    posnode.Add(node.Id)
-            posnode = list(set(posnode))
-        n = len(posnode)
-        n_pos=[None]*n 
-        for i, node in enumerate(posnode):
-            if LD=="On":
-                n_pos[i] = [x*sol_scale for x in LOCDEF.GetNodeValues(node)] # Get nodal positions at load step
-            if LD=="Off":
-                n_pos[i] = [mesh.NodeById(node).X, mesh.NodeById(node).Y, mesh.NodeById(node).Z] # Get nodal initial position
-        CG = ave_disp(n_pos) # Determine nodal centroid            
-        F_count = 0
-        for element in secelement:
-            for node in posnode:
-                if element.NodeIds.IndexOf(node)>=0:
-                    F_count=F_count+1
-        F_nodes = [None]*F_count
-        n_pos = [None]*F_count
-        count = 0
-        for element in secelement:
-            F_element = F.GetElementValues(element.Id) # elementnodal force reactions are reported in one long list with each [Fx1, Fy1, Fz1, Fx2, Fy2, Fz3, ... Fzn], not as individual vectors
-            index = List[object]()
-            for node in posnode:
-                if element.NodeIds.IndexOf(node)>=0:
-                    index.Add(element.NodeIds.IndexOf(node))
-            for i in range(len(index)):
-                F_nodes[count]=[None]*3 # Assign elementnodal force reaction into node-specific vector
-                F_nodes[count][0] = F_element[3*index[i]]
-                F_nodes[count][1] = F_element[3*index[i]+1]
-                F_nodes[count][2] = F_element[3*index[i]+2]
-                if LD=="On":
-                    n_pos[count] = [x*sol_scale for x in LOCDEF.GetNodeValues(element.NodeIds[index[i]])] # Assign elementnodal position vectors to pair with respective force reactions
-                if LD=="Off":
-                    n_pos[count] = [mesh.NodeById(element.NodeIds[index[i]]).X, mesh.NodeById(element.NodeIds[index[i]]).Y, mesh.NodeById(element.NodeIds[index[i]]).Z]                
-                count = count+1  
-        r = [None]*F_count 
-        Global_M = [0.0,0.0,0.0]
-        Local_M = [0.0,0.0,0.0]
-        r_max = 0
-        for f, force in enumerate(F_nodes):
-            r[f] = [(n_pos[f][0]-CG[0]),(n_pos[f][1]-CG[1]),(n_pos[f][2]-CG[2])] # Determine loacal r vector
-            if mag(r[f]) > r_max:
-                r_max = mag(r[f])
-            Global_M = vsum(Global_M,cross(r[f],force)) # Sum all M=rxF products in Global orientation (default solver reporting)
-        Local_M = transform(rot,Global_M) # Transform M into selected CS orientation 
-        Local_M = [m for m in Local_M] # Sign inverse for external force Reaction.       
+        local_moment, r_max = process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, model_scale)
+        
+    else:
+        # TODO: print error message to user 
+        # This should not be a condition that can happen...
+        assert False 
 
-    collector.SetValues(nodes[0],[Local_M[0],Local_M[1],Local_M[2]])
+    # Assign just the first node the result for display to the user
+    collector.SetValues(nodes[0], [local_moment[0], local_moment[1], local_moment[2]])
 
-    #Set initial graphics for triad and vector
-    if result.DisplayTime.Value == 0: # If Display Time is "Last", find numerical value. 
+    # Set initial graphics for triad and vector
+    if result.DisplayTime.Value == 0: 
+        # If Display Time is "Last", find numerical value. 
         check = max(solved_steps)
     else:
         check = result.DisplayTime.Value
-    if stepInfo.Set == check: # Plot CS and M vector for selected time step display
+        
+    if stepInfo.Time == check: # Plot CS and M vector for selected time step display
         ExtAPI.Graphics.Scene.Clear()
-        result.Properties["Results/Mx"].Value = Local_M[0] # Store hidden result properties (see XML) for storing direction components
-        result.Properties["Results/My"].Value = Local_M[1]
-        result.Properties["Results/Mz"].Value = Local_M[2]
-        result.Properties["Results/Rmax"].Value = r_max
-        if mode == "Interface":
-            faceIds=result.Properties["Geometry"].Value
-            centroids=[]
-            for id in faceIds:
-                face = ExtAPI.DataModel.GeoData.GeoEntityById(id)
-                centroids.append(face.Centroid)
-            center = ave_disp(centroids)
-        if mode == "Section":
-            center = (CS.Origin[0]/mod_scale,CS.Origin[1]/mod_scale,CS.Origin[2]/mod_scale)
-        size = r_max
-        cs = ExtAPI.Graphics.Scene.Factory3D.CreateTriad(size) # Create triad graphics and set size 
-        M=STM(CS.XAxis,CS.YAxis,CS.ZAxis) # Convert 3x3 CS into STM 4x4
-        cs.Transformation3D.Set(M) # Define triad orientation
-        cs.Transformation3D.Translate(center[0],center[1],center[2]) # Define tirad origin
-        Vector = ExtAPI.Graphics.Scene.Factory3D.CreateArrow(2*size) # Create vector graphics and set size 
-        Vector.Color = 0x800080 # Purple
-        x = result.Properties["Results/Mx"].Value
-        y = result.Properties["Results/My"].Value
-        z = result.Properties["Results/Mz"].Value
-        r = sqrt(y*y+z*z)
-        Vector.Transformation3D.Set(M)  # Define vector orientation
-        Vector.Transformation3D.Rotate(ExtAPI.Graphics.CreateVector3D(CS.YAxis[0],CS.YAxis[1],CS.YAxis[2]), atan2(x,r)) # Vector defaults to Z axis, so rotate into result direction
-        Vector.Transformation3D.Rotate(ExtAPI.Graphics.CreateVector3D(CS.XAxis[0],CS.XAxis[1],CS.XAxis[2]), atan2(z,y) - pi/2.0)
-        Vector.Transformation3D.Translate(center[0],center[1],center[2]) # Define vector origin
+        plot_csys_and_vector(result, mode, local_csys, local_moment, r_max, model_scale)
+
     reader.Dispose()
 
-#-------------------Graphics Display/Hide--------------------
 
-def ShowCS(result): # Graphics to display when result object is selected in Tree
+def plot_csys_and_vector(result, mode, local_csys, local_moment, r_max, model_scale):
+
+    origin = local_csys.Origin
+
+    # Store hidden result properties (see XML) for storing direction components
+    result.Properties["Results/Mx"].Value = local_moment[0] 
+    result.Properties["Results/My"].Value = local_moment[1]
+    result.Properties["Results/Mz"].Value = local_moment[2]
+    result.Properties["Results/Rmax"].Value = r_max
+
+    if mode == "Interface":
+        faceIds=result.Properties["Geometry"].Value
+        centroids = []
+        for id in faceIds:
+            face = ExtAPI.DataModel.GeoData.GeoEntityById(id)
+            centroids.append(face.Centroid)
+        center = avg_disp(centroids)
+
+    elif mode == "Section":
+        center = [
+            origin[0] / model_scale, 
+            origin[1] / model_scale, 
+            origin[2] / model_scale
+        ]
+
+    else:
+        # TODO: print error message 
+        assert False
+
+    # Create triad graphics and set size 
+    cs = ExtAPI.Graphics.Scene.Factory3D.CreateTriad(r_max) 
+
+     # Convert 3x3 CS into STM 4x4 and define triad origin and orientation
+    rotation_matrix = create_stm(local_csys.XAxis, local_csys.YAxis, local_csys.ZAxis)
+    cs.Transformation3D.Set(rotation_matrix) 
+    cs.Transformation3D.Translate(center[0],center[1],center[2]) 
+
+    # Create vector graphics and set size 
+    Vector = ExtAPI.Graphics.Scene.Factory3D.CreateArrow(2*r_max) 
+    Vector.Color = 0x800080 # Purple
+    x = result.Properties["Results/Mx"].Value
+    y = result.Properties["Results/My"].Value
+    z = result.Properties["Results/Mz"].Value
+
+    # Set moment vector origin and orientation
+    r = sqrt(y*y+z*z)
+    Vector.Transformation3D.Set(rotation_matrix)
+    # Vector defaults to Z axis, so rotate into result direction
+    Vector.Transformation3D.Rotate(
+        ExtAPI.Graphics.CreateVector3D(
+            local_csys.YAxis[0], local_csys.YAxis[1], local_csys.YAxis[2]
+        ), 
+        atan2(x, r)
+    ) 
+    Vector.Transformation3D.Rotate(
+        ExtAPI.Graphics.CreateVector3D(
+            local_csys.XAxis[0], 
+            local_csys.XAxis[1],
+            local_csys.XAxis[2]
+        ), 
+        atan2(z,y) - pi/2.0
+    )
+    Vector.Transformation3D.Translate(center[0], center[1], center[2]) 
+
+
+def ShowCS(result): 
+    """ Display graphics when result object is selected in the tree 
+    
+    Does the following: 
+    - Shows and scales vectors 
+    - Converts results using proper model units 
+    """
+    
     if result.State == "solved":
-        ExtAPI.Graphics.ViewOptions.ShowResultVectors=True
-        ExtAPI.Graphics.ViewOptions.VectorDisplay.DisplayType=VectorDisplayType.Sphere
-        ExtAPI.Graphics.ViewOptions.VectorDisplay.LengthMultiplier=0.1
-        modunits=ExtAPI.DataModel.GeoData.Unit 
-        scale = units.ConvertToUserUnit(ExtAPI,1,modunits,"Length")
+        
+        # Settings independent of tool mode
+        ExtAPI.Graphics.ViewOptions.ShowResultVectors = True
+        ExtAPI.Graphics.ViewOptions.VectorDisplay.DisplayType = VectorDisplayType.Sphere
+        ExtAPI.Graphics.ViewOptions.VectorDisplay.LengthMultiplier = 0.1
+        modunits = ExtAPI.DataModel.GeoData.Unit 
+        scale = units.ConvertToUserUnit(ExtAPI, 1, modunits, "Length")
         mode = result.Properties["Mode"].Value
         CS = result.Properties["Orientation"].Value
         r_max = result.Properties["Results/Rmax"].Value
+        
         if mode == "Interface":
-            faceIds=result.Properties["Geometry"].Value
-            centroids=[]
+            faceIds = result.Properties["Geometry"].Value
+            centroids = []
             for id in faceIds:
                 face = ExtAPI.DataModel.GeoData.GeoEntityById(id)
                 centroids.append(face.Centroid)
-            center = ave_disp(centroids)
+            center = avg_disp(centroids)
+            
         if mode == "Section":
-            center = (CS.Origin[0]/scale,CS.Origin[1]/scale,CS.Origin[2]/scale)
+            center = (CS.Origin[0]/scale, CS.Origin[1]/scale, CS.Origin[2]/scale)
+            
         size = r_max
         cs = ExtAPI.Graphics.Scene.Factory3D.CreateTriad(size)
-        M=STM(CS.XAxis,CS.YAxis,CS.ZAxis)
+        M = create_stm(CS.XAxis, CS.YAxis, CS.ZAxis)
         cs.Transformation3D.Set(M)
         cs.Transformation3D.Translate(center[0],center[1],center[2])
         Vector = ExtAPI.Graphics.Scene.Factory3D.CreateArrow(2*size)
@@ -264,20 +612,48 @@ def ShowCS(result): # Graphics to display when result object is selected in Tree
         x = result.Properties["Results/Mx"].Value
         y = result.Properties["Results/My"].Value
         z = result.Properties["Results/Mz"].Value
-        r = sqrt(y*y+z*z)
+        r = sqrt(y*y + z*z)
         Vector.Transformation3D.Set(M)
         Vector.Transformation3D.Rotate(ExtAPI.Graphics.CreateVector3D(CS.YAxis[0],CS.YAxis[1],CS.YAxis[2]), atan2(x,r))
         Vector.Transformation3D.Rotate(ExtAPI.Graphics.CreateVector3D(CS.XAxis[0],CS.XAxis[1],CS.XAxis[2]), atan2(z,y) - pi/2.0)
         Vector.Transformation3D.Translate(center[0],center[1],center[2])
 
-def HideCS(result): # Clear grapghics when result object is deselected
+
+def HideCS(result):
+    """ Clear graphics object when tool is de-selected
+    """ 
+    
     ExtAPI.Graphics.Scene.Clear()
 
-#-------------------Scoping verification--------------------
 
 def geoCheck(result, prop):
-    #ExtAPI.Log.WriteMessage(str(prop.Value))
-    if prop.Value != None:
-        if result.Properties["Mode"].Value == "Interface" and ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type != GeoCellTypeEnum.GeoFace: return False
-        if result.Properties["Mode"].Value == "Section" and ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type != GeoCellTypeEnum.GeoBody: return False
-        return True
+    """ Checks to make sure the geometry scoping is correct
+    
+    Args
+    ---
+    result: 
+    prop: property of the Geometry/callback
+    
+    Returns
+    ---
+        True, if mode is "Interface" and geometry is a face
+        True, if mode is "Section" and geometry is a body
+        False, otherwise
+    """
+
+    if prop.Value is None: 
+        return False
+    
+    is_mode_interface = result.Properties["Mode"].Value == "Interface"
+    is_mode_section = result.Properties["Mode"].Value == "Section"
+    is_geom_face = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoFace
+    is_geom_body = ExtAPI.DataModel.GeoData.GeoEntityById(prop.Value.Ids[0]).Type == GeoCellTypeEnum.GeoBody
+        
+    if is_mode_interface and is_geom_face:
+        return True 
+    
+    elif is_mode_section and is_geom_body:
+        return True 
+        
+    else: 
+        return False
