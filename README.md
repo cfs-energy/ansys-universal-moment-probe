@@ -10,7 +10,7 @@ This extension can be installed in two ways: binary installer, or directory asso
 Do one of the following:
 1. Workbench menu bar:  
 1.1. Extensions > Install Extension...  
-1.2. Select the binary file.  
+1.2. Select the binary (*.wbex) file.  
 1.3. Extensions > Manage Extensions...  
 1.4. Click the check box next to the extension you want to activate.  
 2. ACT Start Page:  
