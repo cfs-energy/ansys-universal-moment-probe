@@ -113,21 +113,33 @@ def rotation_matrix_from_local_csys(local_csys):
 
 
 def get_scale(analysis, is_ld_on):
-    """ Get the scalar factors associated with solver and model units """
+    """Get the scalar factors associated with solver and model units
+
+    Args
+    ---
+    analysis: int corresponding to the selected analysis index
+    is_ld_on: bool indicating whether large deflection is active
+
+    Returns
+    ---
+    tuple: solver displacement scale, model length scale, and force scale
+    """
 
     reader = analysis.GetResultsData()
-    model_units = ExtAPI.DataModel.GeoData.Unit 
+    model_units = ExtAPI.DataModel.GeoData.Unit
     result_locdef = reader.GetResult("LOC_DEF")
-    solve_units = result_locdef.GetComponentInfo('X').Unit
+    result_enfo = reader.GetResult("ENFO")
+    solve_units = result_locdef.GetComponentInfo("X").Unit
+    force_units = result_enfo.GetComponentInfo("X").Unit
     model_scale = units.ConvertToUserUnit(ExtAPI, 1, model_units, "Length")
+    force_scale = units.ConvertUnit(1, force_units, 'N', "Force")
 
     if is_ld_on:
-        unit_scale = units.ConvertUnit(1, solve_units, model_units,"Length")
-    
+        solver_scale = units.ConvertUnit(1, solve_units, 'm', "Length")
     else:
-        unit_scale = 1.0
+        solver_scale = 1.0
 
-    return unit_scale, model_scale
+    return solver_scale, model_scale, force_scale
 
 
 def get_n_elemnodal_forces(mesh, elem_ids, node_ids):
@@ -154,7 +166,8 @@ def get_elemnodal_data(
     elem_ids, 
     node_ids, 
     is_ld_on, 
-    unit_scale
+    solver_scale,
+    force_scale
 ):
     """ Get the forces and positions associated with a group of nodes 
 
@@ -173,7 +186,7 @@ def get_elemnodal_data(
         node ids at which data should be obtained 
     is_ld_on: Bool
         True if NLGEOM is set to ON, False otherwise 
-    unit_scale: float 
+    solver_scale: float 
         scaling for units 
 
     Returns
@@ -201,14 +214,14 @@ def get_elemnodal_data(
 
         for i in range(len(index)):
             # Assign elementnodal force reaction into node-specific vector
-            node_forces[count][0] = elem_force[3*index[i]]
-            node_forces[count][1] = elem_force[3*index[i]+1]
-            node_forces[count][2] = elem_force[3*index[i]+2]
+            node_forces[count][0] = force_scale * elem_force[3*index[i]]
+            node_forces[count][1] = force_scale * elem_force[3*index[i]+1]
+            node_forces[count][2] = force_scale * elem_force[3*index[i]+2]
             if is_ld_on:
                 # Assign elementnodal position vectors to pair with respective 
                 # force reactions
                 node_positions[count] = [
-                    x*unit_scale for x in result_locdef.GetNodeValues(
+                    x*solver_scale for x in result_locdef.GetNodeValues(
                         element.NodeIds[index[i]]
                         )
                 ] 
@@ -275,7 +288,7 @@ def calculate_moment(node_forces, node_positions, centroid, rotation_matrix):
     
     
 
-def process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale):
+def process_interface(analysis, reader, nodes, local_csys, is_ld_on, solver_scale, force_scale):
     """ Compute the reaction moment at an interface (i.e. boundary condition)
 
     Args
@@ -288,7 +301,7 @@ def process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale)
         local coordinate system definition 
     is_ld_on : Bool
         True if NLGEOM is set to ON, False otherwise
-    unit_scale: float 
+    solver_scale: float 
         scale factor for unit system 
 
 
@@ -317,7 +330,7 @@ def process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale)
         elem_ids += [int(x) for x in mesh.NodeById(node).ConnectedElementIds] 
         if is_ld_on:
             # Get nodal positions at load step
-            node_positions[i] = [x * unit_scale for x in result_locdef.GetNodeValues(node)] 
+            node_positions[i] = [x * solver_scale for x in result_locdef.GetNodeValues(node)] 
         else:
             # Get nodal initial position  
             node_positions[i] = [
@@ -337,7 +350,7 @@ def process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale)
     # Retrieve the nodal forces and positions from the results file, then 
     # compute the moment in the specified local coordinate system 
     node_forces, node_positions = get_elemnodal_data(
-        mesh, result_enfo, result_locdef, n_forces, elem_ids, nodes, is_ld_on, unit_scale
+        mesh, result_enfo, result_locdef, n_forces, elem_ids, nodes, is_ld_on, solver_scale, force_scale
     )
     local_moment, r_max = calculate_moment(
         node_forces, node_positions, centroid, rotation_matrix
@@ -350,7 +363,7 @@ def process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale)
     return local_moment, r_max
 
 
-def process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, model_scale):
+def process_section(analysis, reader, body, local_csys, is_ld_on, solver_scale, model_scale, force_scale):
     """ Compute the moment carried by a solid cross-section
 
     Args
@@ -362,7 +375,7 @@ def process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, mo
         local coordinate system definition  
     is_ld_on : Bool
         True if NLGEOM is set to ON, False otherwise
-    unit_scale: float 
+    solver_scale: float 
         scale factor for unit system 
     model_scale: float 
         scale factor for model unit system 
@@ -429,7 +442,7 @@ def process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, mo
     for i, node in enumerate(positive_nodes):
         if is_ld_on:
             # Get nodal positions at load step
-            node_positions[i] = [x * unit_scale for x in result_locdef.GetNodeValues(node)] 
+            node_positions[i] = [x * solver_scale for x in result_locdef.GetNodeValues(node)] 
         else:
             # Get nodal initial position  
             node_positions[i] = [
@@ -449,7 +462,7 @@ def process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, mo
     # Retrieve the nodal forces and positions from the results file, then 
     # compute the moment in the specified local coordinate system 
     node_forces, node_positions = get_elemnodal_data(
-        mesh, result_enfo, result_locdef, n_forces, elem_ids, positive_nodes, is_ld_on, unit_scale
+        mesh, result_enfo, result_locdef, n_forces, elem_ids, positive_nodes, is_ld_on, solver_scale, force_scale
     )
     local_moment, r_max = calculate_moment(
         node_forces, node_positions, centroid, rotation_matrix
@@ -471,18 +484,18 @@ def LDMProbe(result, stepInfo, collector):
         return
 
     is_ld_on = analysis.AnalysisSettings.PropertyByName('UseLargeDeformation').StringValue == "On"
-    unit_scale, model_scale = get_scale(analysis, is_ld_on)
+    solver_scale, model_scale, force_scale = get_scale(analysis, is_ld_on)
 
     mode = result.Properties["Mode"].Value # "Interface" or "Section"
     local_csys = result.Properties["Orientation"].Value
     nodes = collector.Ids
 
     if mode == "Interface":
-        local_moment, r_max = process_interface(analysis, reader, nodes, local_csys, is_ld_on, unit_scale)
+        local_moment, r_max = process_interface(analysis, reader, nodes, local_csys, is_ld_on, solver_scale, force_scale)
 
     elif mode == "Section":
         body = result.Properties["Geometry"].Value
-        local_moment, r_max = process_section(analysis, reader, body, local_csys, is_ld_on, unit_scale, model_scale)
+        local_moment, r_max = process_section(analysis, reader, body, local_csys, is_ld_on, solver_scale, model_scale, force_scale)
         
     else:
         # TODO: print error message to user 
