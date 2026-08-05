@@ -166,7 +166,7 @@ The reason for the error in the Ansys probe is that it calculates the moment abo
   <img src="img/ansysprobe.png" alt="radius1" width="50%" align="center"/>
 </p>
 
-It should be noted that each time this particular model is re-meshed and re-run, the total moment on the second step as measured by the Ansys probe resulted in a different value. This is because the "closet node" among all equidistant nodes on the ID, with respect to the center CS, is randomly assigned, and so the center of moment summation is not constant.
+It should be noted that each time this particular model is re-meshed and re-run, the total moment on the second step as measured by the Ansys probe resulted in a different value. This is because the "closest node" among all equidistant nodes on the ID, with respect to the center CS, is randomly assigned, and so the center of moment summation is not constant.
 
 ### Conclusion
 
