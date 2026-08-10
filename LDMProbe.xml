@@ -23,7 +23,7 @@
 		</property>
 		<property name="Orientation" caption="Orientation" control="coordinatesystem_selection"/>
 		<propertygroup name="Results">
-		<property name="Mx" caption="Mx" control="test" default="0" visible="False"/>
+		<property name="Mx" caption="Mx" control="text" default="0" visible="False"/>
 		<property name="My" caption="My" control="text" default="0" visible="False"/>
 		<property name="Mz" caption="Mz" control="text" default="0" visible="False"/>
 		<property name="Rmax" caption="Rmax" control="text" default="0" visible="False"/>
